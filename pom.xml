@@ -16,21 +16,21 @@
         <version>2.15.0</version>
     </parent>
 
-    <groupId>top.continew.admin</groupId>
-    <artifactId>continew-admin</artifactId>
+    <groupId>com.guardfind.backend</groupId>
+    <artifactId>guard-find-backend</artifactId>
     <version>${revision}</version>
     <packaging>pom</packaging>
 
     <name>${project.artifactId}</name>
-    <description>ContiNew Admin（Continue New Admin）持续迭代优化的前后端分离中后台管理系统框架，开箱即用，持续提供舒适的开发体验。</description>
-    <url>https://github.com/continew-org/continew-admin</url>
+    <description>Guard Find 管理后台服务端 Maven reactor。</description>
+    <url>https://github.com/guard-find/guard-find-backend</url>
 
     <modules>
-        <module>continew-server</module>
-        <module>continew-system</module>
-        <module>continew-plugin</module>
-        <module>continew-common</module>
-        <module>continew-extension</module>
+        <module>guard-find-backend-api</module>
+        <module>guard-find-backend-system</module>
+        <module>guard-find-backend-plugin</module>
+        <module>guard-find-backend-common</module>
+        <module>guard-find-backend-extension</module>
     </modules>
 
     <properties>
@@ -43,50 +43,50 @@
         <dependencies>
             <!-- API 模块（存放 Controller 层代码，打包部署的模块） -->
             <dependency>
-                <groupId>top.continew.admin</groupId>
-                <artifactId>continew-server</artifactId>
+                <groupId>com.guardfind.backend</groupId>
+                <artifactId>guard-find-backend-api</artifactId>
                 <version>${revision}</version>
             </dependency>
 
             <!-- 系统管理模块（存放系统管理模块相关功能，例如：部门管理、角色管理、用户管理等） -->
             <dependency>
-                <groupId>top.continew.admin</groupId>
-                <artifactId>continew-system</artifactId>
+                <groupId>com.guardfind.backend</groupId>
+                <artifactId>guard-find-backend-system</artifactId>
                 <version>${revision}</version>
             </dependency>
 
             <!-- 公共模块（存放公共工具类，公共配置等） -->
             <dependency>
-                <groupId>top.continew.admin</groupId>
-                <artifactId>continew-common</artifactId>
+                <groupId>com.guardfind.backend</groupId>
+                <artifactId>guard-find-backend-common</artifactId>
                 <version>${revision}</version>
             </dependency>
 
             <!-- 能力开放插件（后续会改造为独立插件） -->
             <dependency>
-                <groupId>top.continew.admin</groupId>
-                <artifactId>continew-plugin-open</artifactId>
+                <groupId>com.guardfind.backend</groupId>
+                <artifactId>guard-find-backend-plugin-open</artifactId>
                 <version>${revision}</version>
             </dependency>
 
             <!-- 租户插件（后续会改造为独立插件） -->
             <dependency>
-                <groupId>top.continew.admin</groupId>
-                <artifactId>continew-plugin-tenant</artifactId>
+                <groupId>com.guardfind.backend</groupId>
+                <artifactId>guard-find-backend-plugin-tenant</artifactId>
                 <version>${revision}</version>
             </dependency>
 
             <!-- 任务调度插件（后续会改造为独立插件） -->
             <dependency>
-                <groupId>top.continew.admin</groupId>
-                <artifactId>continew-plugin-schedule</artifactId>
+                <groupId>com.guardfind.backend</groupId>
+                <artifactId>guard-find-backend-plugin-schedule</artifactId>
                 <version>${revision}</version>
             </dependency>
 
             <!-- 代码生成器插件（后续会改造为独立插件） -->
             <dependency>
-                <groupId>top.continew.admin</groupId>
-                <artifactId>continew-plugin-generator</artifactId>
+                <groupId>com.guardfind.backend</groupId>
+                <artifactId>guard-find-backend-plugin-generator</artifactId>
                 <version>${revision}</version>
             </dependency>
         </dependencies>
@@ -185,7 +185,7 @@
             <properties>
                 <sonar.host.url>https://sonarcloud.io</sonar.host.url>
                 <sonar.organization>charles7c</sonar.organization>
-                <sonar.projectKey>Charles7c_continew-admin</sonar.projectKey>
+                <sonar.projectKey>Charles7c_guard-find-backend</sonar.projectKey>
                 <sonar.moduleKey>${project.groupId}:${project.artifactId}</sonar.moduleKey>
             </properties>
             <activation>

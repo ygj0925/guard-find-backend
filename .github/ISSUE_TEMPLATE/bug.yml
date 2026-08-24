@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        感谢您使用 ContiNew Admin！请您花些时间填写这份 Bug 报告。前端项目 Bug 请提交至 [ContiNew Admin UI](https://github.com/continew-org/continew-admin-ui/issues/new/choose)。<br>
+        感谢您使用 Guard Find Backend！请您花些时间填写这份 Bug 报告。前端项目 Bug 请提交至 [Guard Find Backend UI](https://github.com/continew-org/guard-find-backend-ui/issues/new/choose)。<br>
         **温馨提示：我们利用业余时间维护开源项目，没有额外精力及人员维护已发布版本，所以请务必检查【最新版本】是否正常，如已修复请自行跟进修复！**
   - type: checkboxes
     id: checkboxes
@@ -18,11 +18,11 @@ body:
           required: true
         - label: 我确认尝试了最新 dev 分支代码（演示环境），仍有相同问题
           required: true
-        - label: 我确认搜索了 [Issue 广场](https://continew.top/docs/admin/issue-hub.html)，没有其他人提交过类似的 Bug（如果对应 Bug 尚未解决，您可以先订阅关注该 Issue，为了方便后来者查找问题解决方法，请避免创建重复的 Issue）
+        - label: 我确认搜索了 [Issue 广场](https://guard-find.local/docs/admin/issue-hub.html)，没有其他人提交过类似的 Bug（如果对应 Bug 尚未解决，您可以先订阅关注该 Issue，为了方便后来者查找问题解决方法，请避免创建重复的 Issue）
           required: true
-        - label: 我确认查阅过 [使用指南](https://continew.top/docs/admin/guide/introduction.html) 和 [常见问题](https://continew.top/docs/admin/faq.html) 
+        - label: 我确认查阅过 [使用指南](https://guard-find.local/docs/admin/guide/introduction.html) 和 [常见问题](https://guard-find.local/docs/admin/faq.html)
           required: true
-        - label: 我确认问过 [DeepWiki](https://deepwiki.com/continew-org/continew-admin) 及知名 AI 大模型
+        - label: 我确认问过 [DeepWiki](https://deepwiki.com/continew-org/guard-find-backend) 及知名 AI 大模型
           required: true
         - label: 我确认不是依赖组件相关的 Bug（例如：sa-token、mybatis-plus、snail-job、cosid等，依赖组件相关的 Bug，请提交至对应组件仓库）
           required: true
@@ -37,8 +37,8 @@ body:
 
   - type: dropdown
     attributes:
-      label: ContiNew Admin 版本
-      description: 您使用的 ContiNew Admin 版本，如没有支持的版本选项，请查阅 [更新日志](https://continew.top/docs/admin/changelog/) 或 [版本升级指南](https://continew.top/docs/admin/guide/upgrade.html) 并升级至最新稳定版本。
+      label: Guard Find Backend 版本
+      description: 您使用的 Guard Find Backend 版本，如没有支持的版本选项，请查阅 [更新日志](https://guard-find.local/docs/admin/changelog/) 或 [版本升级指南](https://guard-find.local/docs/admin/guide/upgrade.html) 并升级至最新稳定版本。
       multiple: false
       options:
         - 4.2.0-SNAPSHOT (开发版本-dev 分支)

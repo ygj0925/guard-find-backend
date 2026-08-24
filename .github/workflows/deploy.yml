@@ -35,8 +35,8 @@ jobs:
           port: ${{ secrets.SERVER_PORT }}
           username: ${{ secrets.SERVER_USERNAME }}
           password: ${{ secrets.SERVER_PASSWORD }}
-          source: ./continew-server/target/app/*
-          target: ${{ secrets.SERVER_PATH }}/continew-admin
+          source: ./guard-find-backend-api/target/app/*
+          target: ${{ secrets.SERVER_PATH }}/guard-find-backend
           strip_components: 3
       # 5、启动
       - name: Start
@@ -48,5 +48,5 @@ jobs:
           password: ${{ secrets.SERVER_PASSWORD }}
           script: |
             cd ${{ secrets.SERVER_PATH }}
-            docker-compose up --force-recreate --build -d continew-server
+            docker-compose up --force-recreate --build -d guard-find-backend-api
             docker images | grep none | awk '{print $3}' | xargs -r docker rmi
