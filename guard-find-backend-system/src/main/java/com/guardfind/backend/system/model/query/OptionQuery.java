@@ -41,6 +41,13 @@ public class OptionQuery implements Serializable {
     private static final long serialVersionUID = 1L;
 
     /**
+     * 名称
+     */
+    @Schema(description = "名称", example = "系统标题")
+    @Query(type = QueryType.LIKE)
+    private String name;
+
+    /**
      * 键列表
      */
     @Schema(description = "键列表", example = "SITE_TITLE,SITE_COPYRIGHT")

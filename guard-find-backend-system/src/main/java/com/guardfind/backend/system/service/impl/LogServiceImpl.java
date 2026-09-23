@@ -111,6 +111,7 @@ public class LogServiceImpl implements LogService {
     private QueryWrapper<LogDO> buildQueryWrapper(LogQuery query) {
         String description = query.getDescription();
         String module = query.getModule();
+        String moduleNe = query.getModuleNe();
         String ip = query.getIp();
         String createUserString = query.getCreateUserString();
         DisEnableStatusEnum status = query.getStatus();
@@ -119,6 +120,7 @@ public class LogServiceImpl implements LogService {
             .or()
             .like("t1.module", description))
             .eq(StrUtil.isNotBlank(module), "t1.module", module)
+            .ne(StrUtil.isNotBlank(moduleNe), "t1.module", moduleNe)
             .and(StrUtil.isNotBlank(ip), q -> q.like("t1.ip", ip).or().like("t1.address", ip))
             .and(StrUtil.isNotBlank(createUserString), q -> q.like("t2.username", createUserString)
                 .or()

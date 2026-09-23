@@ -43,6 +43,13 @@ public class FileQuery implements Serializable {
      */
     @Schema(description = "名称", example = "example")
     @Query(type = QueryType.LIKE)
+    private String name;
+
+    /**
+     * 原始名称
+     */
+    @Schema(description = "原始名称", example = "example")
+    @Query(type = QueryType.LIKE)
     private String originalName;
 
     /**

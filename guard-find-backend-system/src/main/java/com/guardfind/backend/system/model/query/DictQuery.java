@@ -38,6 +38,20 @@ public class DictQuery implements Serializable {
     private static final long serialVersionUID = 1L;
 
     /**
+     * 名称
+     */
+    @Schema(description = "名称", example = "公告类型")
+    @Query(type = QueryType.LIKE)
+    private String name;
+
+    /**
+     * 编码
+     */
+    @Schema(description = "编码", example = "notice_type")
+    @Query(type = QueryType.LIKE)
+    private String code;
+
+    /**
      * 关键词
      */
     @Schema(description = "关键词")

@@ -20,6 +20,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 import top.continew.starter.data.annotation.Query;
 import top.continew.starter.data.enums.QueryType;
+import com.guardfind.backend.common.enums.DisEnableStatusEnum;
 
 import java.io.Serial;
 import java.io.Serializable;
@@ -44,4 +45,18 @@ public class AppQuery implements Serializable {
     @Schema(description = "关键词", example = "应用1")
     @Query(columns = {"name", "description"}, type = QueryType.LIKE)
     private String description;
+
+    /**
+     * 名称
+     */
+    @Schema(description = "名称", example = "应用1")
+    @Query(type = QueryType.LIKE)
+    private String name;
+
+    /**
+     * 状态
+     */
+    @Schema(description = "状态", example = "1")
+    @Query(type = QueryType.EQ)
+    private DisEnableStatusEnum status;
 }

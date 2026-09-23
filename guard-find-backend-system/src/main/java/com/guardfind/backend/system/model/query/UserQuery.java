@@ -46,6 +46,18 @@ public class UserQuery implements Serializable {
     private String description;
 
     /**
+     * 用户名
+     */
+    @Schema(description = "用户名", example = "zhangsan")
+    private String username;
+
+    /**
+     * 昵称
+     */
+    @Schema(description = "昵称", example = "张三")
+    private String nickname;
+
+    /**
      * 状态
      */
     @Schema(description = "状态", example = "1")

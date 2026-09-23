@@ -487,6 +487,8 @@ public class UserServiceImpl extends BaseServiceImpl<UserMapper, UserDO, UserRes
     @Override
     protected QueryWrapper<UserDO> buildQueryWrapper(UserQuery query) {
         String description = query.getDescription();
+        String username = query.getUsername();
+        String nickname = query.getNickname();
         DisEnableStatusEnum status = query.getStatus();
         List<LocalDateTime> createTimeList = query.getCreateTime();
         Long deptId = query.getDeptId();
@@ -501,6 +503,8 @@ public class UserServiceImpl extends BaseServiceImpl<UserMapper, UserDO, UserRes
             .like("t1.nickname", description)
             .or()
             .like("t1.description", description))
+            .like(StrUtil.isNotBlank(username), "t1.username", username)
+            .like(StrUtil.isNotBlank(nickname), "t1.nickname", nickname)
             .eq(status != null, "t1.status", status)
             .between(CollUtil.isNotEmpty(createTimeList), "t1.create_time", CollUtil.getFirst(createTimeList), CollUtil
                 .getLast(createTimeList))

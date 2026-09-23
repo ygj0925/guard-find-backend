@@ -52,6 +52,12 @@ public class LogQuery implements Serializable {
     private String module;
 
     /**
+     * 所属模块（不等于）
+     */
+    @Schema(description = "所属模块（不等于）", example = "登录")
+    private String moduleNe;
+
+    /**
      * IP
      */
     @Schema(description = "IP", example = "")

@@ -40,6 +40,13 @@ public class StorageQuery implements Serializable {
     private static final long serialVersionUID = 1L;
 
     /**
+     * 名称
+     */
+    @Schema(description = "名称", example = "存储1")
+    @Query(type = QueryType.LIKE)
+    private String name;
+
+    /**
      * 关键词
      */
     @Schema(description = "关键词", example = "本地存储")

@@ -46,6 +46,20 @@ public class RoleQuery implements Serializable {
     private String description;
 
     /**
+     * 名称
+     */
+    @Schema(description = "名称", example = "测试人员")
+    @Query(type = QueryType.LIKE)
+    private String name;
+
+    /**
+     * 编码
+     */
+    @Schema(description = "编码", example = "test")
+    @Query(type = QueryType.LIKE)
+    private String code;
+
+    /**
      * 排除的编码列表
      */
     @Schema(description = "排除的编码列表", example = "[super_admin,tenant_admin]")
