@@ -27,7 +27,6 @@ import org.springframework.transaction.annotation.Transactional;
 import com.guardfind.backend.common.base.service.BaseServiceImpl;
 import com.guardfind.backend.common.constant.CacheConstants;
 import com.guardfind.backend.common.context.RoleContext;
-import com.guardfind.backend.common.context.UserContext;
 import com.guardfind.backend.common.context.UserContextHolder;
 import com.guardfind.backend.common.enums.DataScopeEnum;
 import com.guardfind.backend.common.enums.RoleCodeEnum;
@@ -67,6 +66,8 @@ public class RoleServiceImpl extends BaseServiceImpl<RoleMapper, RoleDO, RoleRes
     private UserRoleService userRoleService;
     private final RoleMenuService roleMenuService;
     private final RoleDeptService roleDeptService;
+    @Resource
+    private UserPermissionService userPermissionService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -172,15 +173,7 @@ public class RoleServiceImpl extends BaseServiceImpl<RoleMapper, RoleDO, RoleRes
 
     @Override
     public void updateUserContext(Long roleId) {
-        List<Long> userIdList = userRoleService.listUserIdByRoleId(roleId);
-        userIdList.forEach(userId -> {
-            UserContext userContext = UserContextHolder.getContext(userId);
-            if (userContext != null) {
-                userContext.setRoles(this.listByUserId(userId));
-                userContext.setPermissions(this.listPermissionByUserId(userId));
-                UserContextHolder.setContext(userContext);
-            }
-        });
+        userPermissionService.refreshUsers(userRoleService.listUserIdByRoleId(roleId));
     }
 
     @Override

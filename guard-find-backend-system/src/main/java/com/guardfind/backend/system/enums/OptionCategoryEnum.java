@@ -42,5 +42,15 @@ public enum OptionCategoryEnum {
     /**
      * 登录配置
      */
-    LOGIN,
+    LOGIN;
+
+    public String permission(String action) {
+        String resource = switch (this) {
+            case SITE -> "siteConfig";
+            case PASSWORD -> "securityConfig";
+            case MAIL -> "mailConfig";
+            case LOGIN -> "loginConfig";
+        };
+        return "system:" + resource + ":" + action;
+    }
 }

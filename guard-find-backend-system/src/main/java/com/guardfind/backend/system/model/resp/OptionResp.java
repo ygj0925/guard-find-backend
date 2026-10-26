@@ -43,6 +43,9 @@ public class OptionResp implements Serializable {
     @Schema(description = "ID", example = "1")
     private Long id;
 
+    @Schema(description = "参数类别", example = "SITE")
+    private String category;
+
     /**
      * 名称
      */

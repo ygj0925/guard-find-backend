@@ -40,6 +40,7 @@ import com.guardfind.backend.system.model.req.MenuReq;
 import com.guardfind.backend.system.model.resp.MenuResp;
 import com.guardfind.backend.system.service.MenuService;
 import com.guardfind.backend.system.service.RoleService;
+import com.guardfind.backend.system.service.UserPermissionService;
 import top.continew.starter.cache.redisson.util.RedisUtils;
 import top.continew.starter.core.constant.StringConstants;
 import top.continew.starter.core.util.CollUtils;
@@ -65,6 +66,9 @@ public class MenuServiceImpl extends BaseServiceImpl<MenuMapper, MenuDO, MenuRes
     @Lazy
     @Resource
     private RoleService roleService;
+    @Lazy
+    @Resource
+    private UserPermissionService userPermissionService;
 
     @Override
     public List<Tree<Long>> tree(MenuQuery query, SortQuery sortQuery, boolean isSimple) {
@@ -91,6 +95,7 @@ public class MenuServiceImpl extends BaseServiceImpl<MenuMapper, MenuDO, MenuRes
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public void update(MenuReq req, Long id) {
         this.checkTitleRepeat(req.getTitle(), req.getParentId(), id);
         // 目录和菜单的组件名称不能重复
@@ -101,6 +106,7 @@ public class MenuServiceImpl extends BaseServiceImpl<MenuMapper, MenuDO, MenuRes
         CheckUtils.throwIfNotEqual(req.getType(), oldMenu.getType(), "不允许修改菜单类型");
         super.update(req, id);
         RedisUtils.deleteByPattern(CacheConstants.ROLE_MENU_KEY_PREFIX + StringConstants.ASTERISK);
+        userPermissionService.refreshMenus(List.of(id));
     }
 
     @Override
@@ -108,6 +114,7 @@ public class MenuServiceImpl extends BaseServiceImpl<MenuMapper, MenuDO, MenuRes
     public void delete(List<Long> ids) {
         // 级联删除菜单（包含子菜单）
         List<Long> allDeleteIdList = this.listCascadingDeleteMenuIds(ids);
+        userPermissionService.refreshMenus(allDeleteIdList);
         baseMapper.deleteByIds(allDeleteIdList);
         RedisUtils.deleteByPattern(CacheConstants.ROLE_MENU_KEY_PREFIX + StringConstants.ASTERISK);
     }

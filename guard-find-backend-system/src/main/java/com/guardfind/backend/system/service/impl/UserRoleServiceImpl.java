@@ -38,6 +38,7 @@ import com.guardfind.backend.system.model.resp.role.RoleUserResp;
 import com.guardfind.backend.system.service.RoleService;
 import com.guardfind.backend.system.service.UserRoleService;
 import com.guardfind.backend.system.service.UserService;
+import com.guardfind.backend.system.service.UserPermissionService;
 import top.continew.starter.core.util.CollUtils;
 import top.continew.starter.core.util.validation.CheckUtils;
 import top.continew.starter.data.util.QueryWrapperHelper;
@@ -65,6 +66,9 @@ public class UserRoleServiceImpl implements UserRoleService {
     @Lazy
     @Resource
     private UserService userService;
+    @Lazy
+    @Resource
+    private UserPermissionService userPermissionService;
 
     @Override
     @AutoOperate(type = RoleUserResp.class, on = "list")
@@ -119,8 +123,19 @@ public class UserRoleServiceImpl implements UserRoleService {
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public void deleteByIds(List<Long> ids) {
+        if (CollUtil.isEmpty(ids))
+            return;
+        List<UserRoleDO> bindings = baseMapper.selectByIds(ids);
+        for (UserRoleDO binding : bindings) {
+            CheckUtils.throwIf(Boolean.TRUE.equals(roleService.getById(binding.getRoleId())
+                .getIsSystem()), "系统内置角色不允许取消分配");
+            CheckUtils.throwIf(Boolean.TRUE.equals(userService.getById(binding.getUserId())
+                .getIsSystem()), "系统内置用户不允许变更角色");
+        }
         baseMapper.deleteByIds(ids);
+        userPermissionService.refreshUsers(CollUtils.mapToList(bindings, UserRoleDO::getUserId));
     }
 
     @Override

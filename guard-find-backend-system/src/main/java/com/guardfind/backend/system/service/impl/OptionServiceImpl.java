@@ -17,6 +17,7 @@
 package com.guardfind.backend.system.service.impl;
 
 import cn.hutool.core.bean.BeanUtil;
+import cn.dev33.satoken.stp.StpUtil;
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.NumberUtil;
 import cn.hutool.core.util.ObjectUtil;
@@ -25,6 +26,7 @@ import com.alicp.jetcache.anno.Cached;
 import com.baomidou.mybatisplus.extension.conditions.update.LambdaUpdateChainWrapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import com.guardfind.backend.common.constant.CacheConstants;
 import com.guardfind.backend.system.enums.OptionCategoryEnum;
 import com.guardfind.backend.system.enums.PasswordPolicyEnum;
@@ -61,7 +63,14 @@ public class OptionServiceImpl implements OptionService {
 
     @Override
     public List<OptionResp> list(OptionQuery query) {
-        return BeanUtil.copyToList(baseMapper.selectList(QueryWrapperHelper.build(query)), OptionResp.class);
+        if (StrUtil.isNotBlank(query.getCategory())) {
+            StpUtil.checkPermission(OptionCategoryEnum.valueOf(query.getCategory()).permission("get"));
+        }
+        List<OptionDO> visible = baseMapper.selectList(QueryWrapperHelper.build(query))
+            .stream()
+            .filter(option -> StpUtil.hasPermission(OptionCategoryEnum.valueOf(option.getCategory()).permission("get")))
+            .toList();
+        return BeanUtil.copyToList(visible, OptionResp.class);
     }
 
     @Override
@@ -74,15 +83,18 @@ public class OptionServiceImpl implements OptionService {
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public void update(List<OptionReq> options) {
         // 非空校验
         List<Long> idList = CollUtils.mapToList(options, OptionReq::getId);
         List<OptionDO> optionList = baseMapper.selectByIds(idList);
-        Map<String, OptionDO> optionMap = optionList.stream()
-            .collect(Collectors.toMap(OptionDO::getCode, Function.identity(), (existing, replacement) -> existing));
+        Map<Long, OptionDO> optionMap = optionList.stream()
+            .collect(Collectors.toMap(OptionDO::getId, Function.identity(), (existing, replacement) -> existing));
         for (OptionReq req : options) {
-            OptionDO option = optionMap.get(req.getCode());
+            OptionDO option = optionMap.get(req.getId());
             ValidationUtils.throwIfNull(option, "参数 [{}] 不存在", req.getCode());
+            ValidationUtils.throwIf(!StrUtil.equals(option.getCode(), req.getCode()), "参数 ID 与键不匹配");
+            StpUtil.checkPermission(OptionCategoryEnum.valueOf(option.getCategory()).permission("update"));
             if (StrUtil.isNotBlank(option.getDefaultValue())) {
                 ValidationUtils.throwIfBlank(req.getValue(), "参数 [{}] 的值不能为空", option.getName());
             }
@@ -104,11 +116,22 @@ public class OptionServiceImpl implements OptionService {
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public void resetValue(OptionValueResetReq req) {
-        RedisUtils.deleteByPattern(CacheConstants.OPTION_KEY_PREFIX + StringConstants.ASTERISK);
         String category = req.getCategory();
         List<String> codeList = req.getCode();
         ValidationUtils.throwIf(StrUtil.isBlank(category) && CollUtil.isEmpty(codeList), "键列表不能为空");
+        OptionQuery query = new OptionQuery();
+        if (StrUtil.isNotBlank(category)) {
+            StpUtil.checkPermission(OptionCategoryEnum.valueOf(category).permission("update"));
+            query.setCategory(category);
+        } else {
+            query.setCode(codeList);
+        }
+        baseMapper.selectList(QueryWrapperHelper.build(query))
+            .forEach(option -> StpUtil.checkPermission(OptionCategoryEnum.valueOf(option.getCategory())
+                .permission("update")));
+        RedisUtils.deleteByPattern(CacheConstants.OPTION_KEY_PREFIX + StringConstants.ASTERISK);
         LambdaUpdateChainWrapper<OptionDO> updateWrapper = baseMapper.lambdaUpdate().set(OptionDO::getValue, null);
         if (StrUtil.isNotBlank(category)) {
             updateWrapper.eq(OptionDO::getCategory, category);

@@ -34,6 +34,7 @@
     </modules>
 
     <properties>
+        <skipTests>true</skipTests>
         <!-- 项目版本号 -->
         <revision>4.2.0-SNAPSHOT</revision>
     </properties>
@@ -123,7 +124,7 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
                     <!-- 跳过单元测试 -->
-                    <skip>true</skip>
+                    <skipTests>${skipTests}</skipTests>
                 </configuration>
             </plugin>
             <!-- 代码格式化插件 -->
