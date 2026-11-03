@@ -73,13 +73,14 @@ public class AdminImServiceImpl implements AdminImService {
                 // 超过 Long 范围的数字仍可作为昵称搜索，不转换成不精确的数值。
             }
         }
-        String escapedKeyword = keyword == null ? null : keyword.replace("!", "!!").replace("%", "!%")
-            .replace("_", "!_");
+        String escapedKeyword = keyword == null
+            ? null
+            : keyword.replace("!", "!!").replace("%", "!%").replace("_", "!_");
         boolean onlyUnread = query != null && Boolean.TRUE.equals(query.getOnlyUnread());
         Long beforeId = query == null ? null : query.getBeforeId();
         long offset = beforeId == null ? (long)(page - 1) * size : 0;
-        List<AdminMessageDO> recent = adminMessageMapper.conversationPage(offset, size, escapedKeyword, searchUserId,
-            onlyUnread, beforeId);
+        List<AdminMessageDO> recent = adminMessageMapper
+            .conversationPage(offset, size, escapedKeyword, searchUserId, onlyUnread, beforeId);
         Map<Long, AdminMessageDO> lastByUser = recent.stream()
             .collect(Collectors.toMap(AdminMessageDO::getUserId, m -> m));
         List<Long> pageUserIds = recent.stream().map(AdminMessageDO::getUserId).toList();

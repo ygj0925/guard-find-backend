@@ -284,7 +284,12 @@ public class PropertyInteractionServiceImpl implements PropertyInteractionServic
     }
 
     private PageResp<PropertyResp> propertyPage(Page<PropertyDO> page) {
-        List<Long> ownerIds = page.getRecords().stream().map(PropertyDO::getUserId).filter(Objects::nonNull).distinct().toList();
+        List<Long> ownerIds = page.getRecords()
+            .stream()
+            .map(PropertyDO::getUserId)
+            .filter(Objects::nonNull)
+            .distinct()
+            .toList();
         Map<Long, MiniappUserDO> owners = ownerIds.isEmpty()
             ? Map.of()
             : appUserMapper.selectByIds(ownerIds)

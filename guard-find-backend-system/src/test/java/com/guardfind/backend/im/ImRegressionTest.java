@@ -159,8 +159,7 @@ class ImRegressionTest {
         var pagination = new top.continew.starter.extension.crud.model.query.PageQuery();
         pagination.setPage(5);
         pagination.setSize(30);
-        when(support.conversationPage(0, 30, "9007199254740993", 9007199254740993L, true, 123L))
-            .thenReturn(List.of());
+        when(support.conversationPage(0, 30, "9007199254740993", 9007199254740993L, true, 123L)).thenReturn(List.of());
         var admin = new AdminImServiceImpl(support, users, mock(ObjectProvider.class), mock(ObjectProvider.class));
         admin.conversations(pagination, query);
         verify(support).conversationPage(0, 30, "9007199254740993", 9007199254740993L, true, 123L);

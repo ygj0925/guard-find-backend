@@ -99,7 +99,8 @@ public class PropertyServiceImpl implements PropertyService {
             throw new BusinessException("房源不存在");
         }
         Long viewer = MiniappUserContextHolder.getUserId();
-        if (!Integer.valueOf(2).equals(property.getStatus()) && (viewer == null || !viewer.equals(property.getUserId()))) {
+        if (!Integer.valueOf(2).equals(property.getStatus()) && (viewer == null || !viewer.equals(property
+            .getUserId()))) {
             throw new BusinessException("房源不存在或未上架");
         }
         // 浏览计数自增
@@ -287,7 +288,12 @@ public class PropertyServiceImpl implements PropertyService {
     }
 
     private PageResp<PropertyResp> toPage(Page<PropertyDO> page) {
-        List<Long> userIds = page.getRecords().stream().map(PropertyDO::getUserId).filter(Objects::nonNull).distinct().toList();
+        List<Long> userIds = page.getRecords()
+            .stream()
+            .map(PropertyDO::getUserId)
+            .filter(Objects::nonNull)
+            .distinct()
+            .toList();
         Map<Long, MiniappUserDO> users = userIds.isEmpty()
             ? Map.of()
             : appUserMapper.selectByIds(userIds)

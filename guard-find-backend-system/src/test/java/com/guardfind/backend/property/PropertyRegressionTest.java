@@ -307,7 +307,9 @@ class PropertyRegressionTest {
             var request = req();
             assertTrue(factory.getValidator().validate(request).isEmpty());
             request.setOwnerId(0L);
-            assertTrue(factory.getValidator().validate(request).stream()
+            assertTrue(factory.getValidator()
+                .validate(request)
+                .stream()
                 .anyMatch(v -> v.getPropertyPath().toString().equals("ownerId")));
         }
         service.createForAdmin(null, req());
