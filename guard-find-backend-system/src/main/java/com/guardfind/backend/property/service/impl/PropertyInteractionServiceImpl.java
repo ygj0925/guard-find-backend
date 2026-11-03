@@ -175,8 +175,10 @@ public class PropertyInteractionServiceImpl implements PropertyInteractionServic
         bookingMapper.insert(booking);
 
         // 站内信通知房东
-        messageService.send(property.getUserId(), "PROPERTY_BOOKING", booking.getId(), "收到看房预约", "你的房源「" + property
-            .getTitle() + "」有新的看房预约,点击查看");
+        if (property.getUserId() != null) {
+            messageService.send(property.getUserId(), "PROPERTY_BOOKING", booking.getId(), "收到看房预约", "你的房源「" + property
+                .getTitle() + "」有新的看房预约,点击查看");
+        }
         return booking.getId();
     }
 
@@ -202,9 +204,13 @@ public class PropertyInteractionServiceImpl implements PropertyInteractionServic
         }
         boolean asOwner = Objects.equals(booking.getOwnerId(), userId);
         boolean asGuest = Objects.equals(booking.getUserId(), userId);
-        if (!asOwner && !asGuest) {
+        if (userId == null || (!asOwner && !asGuest)) {
             throw new BusinessException("预约不存在");
         }
+        changeBookingStatus(booking, asGuest, status);
+    }
+
+    private void changeBookingStatus(PropertyBookingDO booking, boolean asGuest, Integer status) {
         if (status == null) {
             throw new BusinessException("状态取值不合法");
         }
@@ -224,7 +230,7 @@ public class PropertyInteractionServiceImpl implements PropertyInteractionServic
             }
         }
         int changed = bookingMapper.update(null, Wrappers.<PropertyBookingDO>lambdaUpdate()
-            .eq(PropertyBookingDO::getId, bookingId)
+            .eq(PropertyBookingDO::getId, booking.getId())
             .eq(PropertyBookingDO::getStatus, booking.getStatus())
             .set(PropertyBookingDO::getStatus, status)
             .set(PropertyBookingDO::getUpdateTime, LocalDateTime.now()));
@@ -232,10 +238,12 @@ public class PropertyInteractionServiceImpl implements PropertyInteractionServic
             throw new BusinessException("预约状态已变化，请刷新后重试");
 
         // 站内信通知对方
-        Long notifyUserId = asOwner ? booking.getUserId() : booking.getOwnerId();
+        Long notifyUserId = asGuest ? booking.getOwnerId() : booking.getUserId();
         String action = status == BOOKING_CONFIRMED ? "已确认" : status == BOOKING_REJECTED ? "已拒绝" : "已取消";
-        messageService.send(notifyUserId, "PROPERTY_BOOKING", booking
-            .getId(), "看房预约" + action, "你的看房预约" + action + ",点击查看详情");
+        if (notifyUserId != null) {
+            messageService.send(notifyUserId, "PROPERTY_BOOKING", booking
+                .getId(), "看房预约" + action, "你的看房预约" + action + ",点击查看详情");
+        }
     }
 
     public PageResp<PropertyBookingResp> bookingsForAdmin(Integer status, Long propertyId, PageQuery query) {
@@ -252,7 +260,7 @@ public class PropertyInteractionServiceImpl implements PropertyInteractionServic
         var booking = bookingMapper.selectById(id);
         if (booking == null)
             throw new BusinessException("预约不存在");
-        updateBookingStatus(Integer.valueOf(4).equals(status) ? booking.getUserId() : booking.getOwnerId(), id, status);
+        changeBookingStatus(booking, Integer.valueOf(4).equals(status), status);
     }
 
     @Override
@@ -276,7 +284,7 @@ public class PropertyInteractionServiceImpl implements PropertyInteractionServic
     }
 
     private PageResp<PropertyResp> propertyPage(Page<PropertyDO> page) {
-        List<Long> ownerIds = page.getRecords().stream().map(PropertyDO::getUserId).distinct().toList();
+        List<Long> ownerIds = page.getRecords().stream().map(PropertyDO::getUserId).filter(Objects::nonNull).distinct().toList();
         Map<Long, MiniappUserDO> owners = ownerIds.isEmpty()
             ? Map.of()
             : appUserMapper.selectByIds(ownerIds)
@@ -286,7 +294,7 @@ public class PropertyInteractionServiceImpl implements PropertyInteractionServic
         result.setTotal(page.getTotal());
         result.setList(page.getRecords().stream().map(p -> {
             var resp = PropertyRespAssembler.toResp(p);
-            var owner = owners.get(p.getUserId());
+            var owner = p.getUserId() == null ? null : owners.get(p.getUserId());
             if (owner != null) {
                 resp.setOwnerNickname(owner.getNickname());
                 resp.setOwnerAvatar(owner.getAvatar());

@@ -99,7 +99,7 @@ public class PropertyServiceImpl implements PropertyService {
             throw new BusinessException("房源不存在");
         }
         Long viewer = MiniappUserContextHolder.getUserId();
-        if (!Integer.valueOf(2).equals(property.getStatus()) && !Objects.equals(viewer, property.getUserId())) {
+        if (!Integer.valueOf(2).equals(property.getStatus()) && (viewer == null || !viewer.equals(property.getUserId()))) {
             throw new BusinessException("房源不存在或未上架");
         }
         // 浏览计数自增
@@ -108,7 +108,7 @@ public class PropertyServiceImpl implements PropertyService {
             .setSql("view_count = COALESCE(view_count, 0) + 1"));
         property.setViewCount((property.getViewCount() == null ? 0 : property.getViewCount()) + 1);
         PropertyResp resp = toResp(property);
-        MiniappUserDO owner = appUserMapper.selectById(property.getUserId());
+        MiniappUserDO owner = property.getUserId() == null ? null : appUserMapper.selectById(property.getUserId());
         if (owner != null) {
             fillOwner(resp, owner);
         }
@@ -219,7 +219,7 @@ public class PropertyServiceImpl implements PropertyService {
         if (property == null)
             throw new BusinessException("房源不存在");
         var result = toResp(property);
-        var owner = appUserMapper.selectById(property.getUserId());
+        var owner = property.getUserId() == null ? null : appUserMapper.selectById(property.getUserId());
         if (owner != null)
             fillOwner(result, owner);
         return result;
@@ -227,9 +227,11 @@ public class PropertyServiceImpl implements PropertyService {
 
     @Override
     public Long createForAdmin(Long ownerId, PropertyReq req) {
-        var owner = appUserMapper.selectById(ownerId);
-        if (owner == null || !Integer.valueOf(1).equals(owner.getAccountStatus()))
-            throw new BusinessException("请选择有效的小程序房东用户");
+        if (ownerId != null) {
+            var owner = appUserMapper.selectById(ownerId);
+            if (owner == null || !Integer.valueOf(1).equals(owner.getAccountStatus()))
+                throw new BusinessException("请选择有效的小程序房东用户");
+        }
         return create(ownerId, req);
     }
 
@@ -278,14 +280,14 @@ public class PropertyServiceImpl implements PropertyService {
 
     private PropertyDO getOwned(Long id, Long userId) {
         PropertyDO property = propertyMapper.lockById(id);
-        if (property == null || !property.getUserId().equals(userId)) {
+        if (property == null || userId == null || !userId.equals(property.getUserId())) {
             throw new BusinessException("房源不存在");
         }
         return property;
     }
 
     private PageResp<PropertyResp> toPage(Page<PropertyDO> page) {
-        List<Long> userIds = page.getRecords().stream().map(PropertyDO::getUserId).distinct().toList();
+        List<Long> userIds = page.getRecords().stream().map(PropertyDO::getUserId).filter(Objects::nonNull).distinct().toList();
         Map<Long, MiniappUserDO> users = userIds.isEmpty()
             ? Map.of()
             : appUserMapper.selectByIds(userIds)
@@ -293,7 +295,7 @@ public class PropertyServiceImpl implements PropertyService {
                 .collect(Collectors.toMap(MiniappUserDO::getId, Function.identity()));
         List<PropertyResp> list = page.getRecords().stream().map(property -> {
             PropertyResp resp = toResp(property);
-            MiniappUserDO user = users.get(property.getUserId());
+            MiniappUserDO user = property.getUserId() == null ? null : users.get(property.getUserId());
             if (user != null) {
                 fillOwner(resp, user);
             }

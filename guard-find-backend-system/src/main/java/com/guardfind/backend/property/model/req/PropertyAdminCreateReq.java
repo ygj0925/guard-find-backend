@@ -17,11 +17,13 @@
 package com.guardfind.backend.property.model.req;
 
 import lombok.Data;
-import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
+import io.swagger.v3.oas.annotations.media.Schema;
 
 /** Owner is a miniapp identity, never a sys_user administrator. */
 @Data
 public class PropertyAdminCreateReq extends PropertyReq {
-    @NotNull
+    @Schema(description = "房东小程序用户 ID，留空时由后台管理")
+    @Positive(message = "房东用户 ID 必须为正整数")
     private Long ownerId;
 }

@@ -86,8 +86,8 @@ class PropertyRegressionTest {
         return p;
     }
 
-    PropertyReq req() {
-        var r = new PropertyReq();
+    PropertyAdminCreateReq req() {
+        var r = new PropertyAdminCreateReq();
         r.setTitle("房源");
         r.setAddress("详细地址");
         r.setPropertyType("house");
@@ -299,5 +299,88 @@ class PropertyRegressionTest {
             assertThrows(BusinessException.class, () -> service.updateForAdmin(10L, req()));
             verify(properties, never()).updateById(any(PropertyDO.class));
         }
+    }
+
+    @Test
+    void adminOwnerIsOptionalButMustBePositiveWhenProvided() {
+        try (var factory = Validation.buildDefaultValidatorFactory()) {
+            var request = req();
+            assertTrue(factory.getValidator().validate(request).isEmpty());
+            request.setOwnerId(0L);
+            assertTrue(factory.getValidator().validate(request).stream()
+                .anyMatch(v -> v.getPropertyPath().toString().equals("ownerId")));
+        }
+        service.createForAdmin(null, req());
+        var inserted = ArgumentCaptor.forClass(PropertyDO.class);
+        verify(properties).insert(inserted.capture());
+        assertNull(inserted.getValue().getUserId());
+        verifyNoInteractions(users);
+    }
+
+    @Test
+    void adminCannotBindAnUnknownOrDisabledOwner() {
+        assertThrows(BusinessException.class, () -> service.createForAdmin(9L, req()));
+        var owner = new MiniappUserDO();
+        owner.setAccountStatus(2);
+        when(users.selectById(9L)).thenReturn(owner);
+        assertThrows(BusinessException.class, () -> service.createForAdmin(9L, req()));
+        verify(properties, never()).insert(any(PropertyDO.class));
+    }
+
+    @Test
+    void unownedDraftIsNotVisibleToAnonymousAndCannotBeEditedByMiniappUsers() {
+        var draft = property(1);
+        draft.setUserId(null);
+        when(properties.selectById(10L)).thenReturn(draft);
+        when(properties.lockById(10L)).thenReturn(draft);
+        assertThrows(BusinessException.class, () -> service.detail(10L));
+        assertThrows(BusinessException.class, () -> service.update(10L, 2L, req()));
+        assertThrows(BusinessException.class, () -> service.update(10L, null, req()));
+        verify(properties, never()).updateById(any(PropertyDO.class));
+    }
+
+    @Test
+    void publishedUnownedPropertyCanBeReadListedAndFavoritedWithoutOwnerLookup() {
+        var published = property(2);
+        published.setUserId(null);
+        when(properties.selectById(10L)).thenReturn(published);
+        assertNull(service.detail(10L).getUserId());
+        assertNull(service.detailForAdmin(10L).getUserId());
+        var page = new Page<PropertyDO>();
+        page.setRecords(List.of(published));
+        page.setTotal(1);
+        when(properties.selectPage(any(), any())).thenReturn(page);
+        when(properties.favoritePage(any(), eq(1L))).thenReturn(page);
+        assertEquals(1, service.pageForAdmin(null, null, null, null).getTotal());
+        assertNull(interaction.favorites(1L, null).getList().getFirst().getUserId());
+        verifyNoInteractions(users);
+    }
+
+    @Test
+    void unownedPropertyCanBeBookedWithoutSendingANotificationToANullUser() {
+        var published = property(2);
+        published.setUserId(null);
+        when(properties.lockById(10L)).thenReturn(published);
+        interaction.createBooking(1L, 10L, bookingReq());
+        var inserted = ArgumentCaptor.forClass(PropertyBookingDO.class);
+        verify(bookings).insert(inserted.capture());
+        assertNull(inserted.getValue().getOwnerId());
+        assertEquals(1L, inserted.getValue().getUserId());
+        verifyNoInteractions(notices);
+    }
+
+    @Test
+    void adminCanConfirmAnUnownedBookingAndGuestCanCancelWithoutANullNotification() {
+        var pending = booking(1);
+        pending.setOwnerId(null);
+        when(bookings.selectById(20L)).thenReturn(pending);
+        when(bookings.update(isNull(), any())).thenReturn(1);
+        assertThrows(BusinessException.class, () -> interaction.updateBookingStatus(null, 20L, 2));
+        assertThrows(BusinessException.class, () -> interaction.updateBookingStatus(9L, 20L, 2));
+        interaction.updateBookingStatusForAdmin(20L, 2);
+        verify(notices).send(eq(1L), eq("PROPERTY_BOOKING"), eq(20L), anyString(), anyString());
+        clearInvocations(notices);
+        interaction.updateBookingStatus(1L, 20L, 4);
+        verifyNoInteractions(notices);
     }
 }
