@@ -23,6 +23,7 @@ import com.guardfind.backend.miniapp.mapper.MiniappUserMapper;
 import com.guardfind.backend.miniapp.model.entity.MiniappUserDO;
 import com.guardfind.backend.im.mapper.AdminMessageMapper;
 import com.guardfind.backend.im.model.entity.AdminMessageDO;
+import com.guardfind.backend.im.model.query.AdminConversationQuery;
 import com.guardfind.backend.im.model.resp.AdminConversationResp;
 import com.guardfind.backend.im.model.resp.AdminMessageResp;
 import com.guardfind.backend.im.service.AdminImService;
@@ -58,12 +59,27 @@ public class AdminImServiceImpl implements AdminImService {
     private final ObjectProvider<ImWebSocketHandler> wsHandlerProvider;
 
     @Override
-    public PageResp<AdminConversationResp> conversations(PageQuery pageQuery) {
+    public PageResp<AdminConversationResp> conversations(PageQuery pageQuery, AdminConversationQuery query) {
         int page = pageQuery == null || pageQuery.getPage() == null ? 1 : Math.max(1, pageQuery.getPage());
         int size = pageQuery == null || pageQuery.getSize() == null
             ? 10
             : Math.max(1, Math.min(100, pageQuery.getSize()));
-        List<AdminMessageDO> recent = adminMessageMapper.conversationPage((long)(page - 1) * size, size);
+        String keyword = query == null ? null : StrUtil.trimToNull(query.getKeyword());
+        Long searchUserId = null;
+        if (keyword != null && keyword.matches("[0-9]+")) {
+            try {
+                searchUserId = Long.valueOf(keyword);
+            } catch (NumberFormatException ignored) {
+                // 超过 Long 范围的数字仍可作为昵称搜索，不转换成不精确的数值。
+            }
+        }
+        String escapedKeyword = keyword == null ? null : keyword.replace("!", "!!").replace("%", "!%")
+            .replace("_", "!_");
+        boolean onlyUnread = query != null && Boolean.TRUE.equals(query.getOnlyUnread());
+        Long beforeId = query == null ? null : query.getBeforeId();
+        long offset = beforeId == null ? (long)(page - 1) * size : 0;
+        List<AdminMessageDO> recent = adminMessageMapper.conversationPage(offset, size, escapedKeyword, searchUserId,
+            onlyUnread, beforeId);
         Map<Long, AdminMessageDO> lastByUser = recent.stream()
             .collect(Collectors.toMap(AdminMessageDO::getUserId, m -> m));
         List<Long> pageUserIds = recent.stream().map(AdminMessageDO::getUserId).toList();
@@ -81,6 +97,7 @@ public class AdminImServiceImpl implements AdminImService {
             AdminConversationResp resp = new AdminConversationResp();
             resp.setUserId(userId);
             resp.setLastMessage(last.getContent());
+            resp.setLastMessageId(last.getId());
             resp.setLastTime(last.getCreateTime());
             resp.setUnreadCount(unreadByUser.getOrDefault(userId, 0));
             MiniappUserDO user = users.get(userId);
@@ -92,7 +109,7 @@ public class AdminImServiceImpl implements AdminImService {
         }).toList();
         PageResp<AdminConversationResp> pageResp = new PageResp<>();
         pageResp.setList(list);
-        pageResp.setTotal(adminMessageMapper.countConversations());
+        pageResp.setTotal(adminMessageMapper.countConversations(escapedKeyword, searchUserId, onlyUnread));
         return pageResp;
     }
 

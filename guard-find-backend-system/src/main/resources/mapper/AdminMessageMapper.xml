@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.guardfind.backend.im.mapper.AdminMessageMapper">
+    <!-- 筛选先于分页；只使用最新消息决定游标，避免返回有新消息会话的旧消息。 -->
+    <sql id="conversationSource">
+        FROM gf_admin_message m
+        JOIN (SELECT MAX(id) id FROM gf_admin_message GROUP BY user_id) latest ON latest.id = m.id
+        LEFT JOIN gf_miniapp_user u ON u.id = m.user_id AND u.deleted = 0
+        <where>
+            <if test="keyword != null">
+                AND (LOWER(u.nickname) LIKE CONCAT('%', LOWER(#{keyword}), '%') ESCAPE '!'
+                <if test="userId != null">OR m.user_id = #{userId}</if>)
+            </if>
+            <if test="onlyUnread">
+                AND EXISTS (SELECT 1 FROM gf_admin_message unread
+                    WHERE unread.user_id = m.user_id AND unread.sender_type = 'USER' AND unread.is_read = 0)
+            </if>
+        </where>
+    </sql>
+    <select id="countConversations" resultType="long">
+        SELECT COUNT(*) <include refid="conversationSource" />
+    </select>
+    <select id="conversationPage" resultType="com.guardfind.backend.im.model.entity.AdminMessageDO">
+        SELECT m.* FROM (
+            SELECT m.* <include refid="conversationSource" />
+        ) m
+        <if test="beforeId != null">WHERE m.id &lt; #{beforeId}</if>
+        ORDER BY m.id DESC LIMIT #{size} OFFSET #{offset}
+    </select>
+</mapper>

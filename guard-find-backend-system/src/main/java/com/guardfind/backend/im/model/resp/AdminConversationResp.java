@@ -37,6 +37,8 @@ public class AdminConversationResp implements Serializable {
     private String nickname;
     private String avatar;
     private String lastMessage;
+    @Schema(description = "最新消息 ID，用作滚动加载游标")
+    private Long lastMessageId;
     private LocalDateTime lastTime;
     /** 管理员未读(用户发来的未读数) */
     private Integer unreadCount;

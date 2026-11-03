@@ -142,11 +142,38 @@ class ImRegressionTest {
 
     @Test
     void adminConversationPaginationDoesNotScanMessages() {
-        when(support.conversationPage(0, 10)).thenReturn(List.of());
-        when(support.countConversations()).thenReturn(6000L);
+        when(support.conversationPage(0, 10, null, null, false, null)).thenReturn(List.of());
+        when(support.countConversations(null, null, false)).thenReturn(6000L);
         var admin = new AdminImServiceImpl(support, users, mock(ObjectProvider.class), mock(ObjectProvider.class));
-        var page = admin.conversations(null);
+        var page = admin.conversations(null, null);
         assertEquals(6000, page.getTotal());
         verify(support, never()).selectList(any());
+    }
+
+    @Test
+    void adminSearchNormalizesKeywordAndPassesCursorWithoutOffset() {
+        var query = new com.guardfind.backend.im.model.query.AdminConversationQuery();
+        query.setKeyword("  9007199254740993  ");
+        query.setOnlyUnread(true);
+        query.setBeforeId(123L);
+        var pagination = new top.continew.starter.extension.crud.model.query.PageQuery();
+        pagination.setPage(5);
+        pagination.setSize(30);
+        when(support.conversationPage(0, 30, "9007199254740993", 9007199254740993L, true, 123L))
+            .thenReturn(List.of());
+        var admin = new AdminImServiceImpl(support, users, mock(ObjectProvider.class), mock(ObjectProvider.class));
+        admin.conversations(pagination, query);
+        verify(support).conversationPage(0, 30, "9007199254740993", 9007199254740993L, true, 123L);
+        verify(support).countConversations("9007199254740993", 9007199254740993L, true);
+    }
+
+    @Test
+    void adminSearchTreatsLikeWildcardsLiterally() {
+        var query = new com.guardfind.backend.im.model.query.AdminConversationQuery();
+        query.setKeyword("  张%_!  ");
+        when(support.conversationPage(0, 10, "张!%!_!!", null, false, null)).thenReturn(List.of());
+        var admin = new AdminImServiceImpl(support, users, mock(ObjectProvider.class), mock(ObjectProvider.class));
+        admin.conversations(null, query);
+        verify(support).countConversations("张!%!_!!", null, false);
     }
 }

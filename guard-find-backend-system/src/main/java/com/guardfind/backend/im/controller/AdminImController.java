@@ -21,6 +21,8 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import jakarta.validation.Valid;
+import com.guardfind.backend.im.model.query.AdminConversationQuery;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -57,11 +59,11 @@ public class AdminImController {
 
     private final AdminImService adminImService;
 
-    @Operation(summary = "会话列表", description = "按用户聚合,最近消息倒序,含管理员未读数")
+    @Operation(summary = "会话列表", description = "全量昵称模糊搜索或用户 ID 精确搜索，支持未读筛选；最近消息倒序，beforeId 游标滚动加载，total 为全部匹配会话数")
     @SaCheckPermission("system:im:list")
     @GetMapping("/conversations")
-    public PageResp<AdminConversationResp> conversations(PageQuery pageQuery) {
-        return adminImService.conversations(pageQuery);
+    public PageResp<AdminConversationResp> conversations(PageQuery pageQuery, @Valid AdminConversationQuery query) {
+        return adminImService.conversations(pageQuery, query);
     }
 
     @Operation(summary = "私信记录", description = "与指定用户的消息,支持 afterId 增量拉取;拉取即标已读")

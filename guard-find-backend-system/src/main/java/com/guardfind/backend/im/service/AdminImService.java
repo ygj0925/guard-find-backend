@@ -17,6 +17,7 @@
 package com.guardfind.backend.im.service;
 
 import com.guardfind.backend.im.model.resp.AdminConversationResp;
+import com.guardfind.backend.im.model.query.AdminConversationQuery;
 import com.guardfind.backend.im.model.resp.AdminMessageResp;
 import top.continew.starter.extension.crud.model.query.PageQuery;
 import top.continew.starter.extension.crud.model.resp.PageResp;
@@ -31,7 +32,7 @@ public interface AdminImService {
     /**
      * 会话列表(按用户聚合,最近消息倒序,含管理员未读数)。
      */
-    PageResp<AdminConversationResp> conversations(PageQuery pageQuery);
+    PageResp<AdminConversationResp> conversations(PageQuery pageQuery, AdminConversationQuery query);
 
     /**
      * 与指定用户的私信记录(afterId 增量);拉取同时把用户发来的消息标已读。
