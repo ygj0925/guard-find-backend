@@ -31,3 +31,5 @@ databaseChangeLog:
 
   - include:
       file: db/changelog/mysql/miniapp_property.sql
+  - include:
+      file: db/changelog/mysql/property_operation_pages.sql
