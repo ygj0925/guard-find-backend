@@ -214,6 +214,15 @@ continew-starter.tenant:
   default-tenant-id: 0
   # 忽略表（忽略拼接租户条件）
   ignore-tables:
+    - gf_property
+    - gf_property_favorite
+    - gf_property_view_history
+    - gf_property_booking
+    - gf_im_conversation
+    - gf_im_message
+    - gf_admin_message
+    - gf_miniapp_user
+    - gf_miniapp_notice
     - tenant # 租户表
     - tenant_package # 租户套餐表
     - tenant_package_menu # 租户套餐与菜单关联表
@@ -230,6 +239,7 @@ continew-starter.tenant:
     - sys_app # 应用表
   # 忽略菜单 ID（租户不能使用的菜单）
   ignore-menus:
+    - 9400 # 平台房源运营
     - 1050 # 菜单管理
     - 1130 # 字典管理
     - 1140 # 字典项管理
@@ -364,3 +374,9 @@ auth:
       - /auth/logout
       - /system/user/password
 
+
+---
+miniapp:
+  wechat:
+    app-id: ${MINIAPP_WECHAT_APP_ID:}
+    app-secret: ${MINIAPP_WECHAT_APP_SECRET:}

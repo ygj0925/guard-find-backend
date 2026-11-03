@@ -82,6 +82,7 @@ public class SaTokenConfiguration {
         SaSignManager.setSaSignTemplate(signTemplate);
         return new SaExtensionInterceptor(handle -> SaRouter.match(StringConstants.PATH_PATTERN)
             .notMatch(properties.getSecurity().getExcludes())
+            .notMatch("/miniapp/**")
             .check(r -> {
                 // 如果包含 sign，进行 API 接口参数签名验证
                 SaRequest saRequest = SaHolder.getRequest();

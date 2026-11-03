@@ -106,12 +106,14 @@ public class FileServiceImpl extends BaseServiceImpl<FileMapper, FileDO, FileRes
 
     @Override
     public FileInfo upload(MultipartFile file, String parentPath, String storageCode) {
-        return this.upload(file, parentPath, storageCode, FileNameUtil.extName(file.getOriginalFilename()));
+        return this.upload(file, parentPath, storageCode, StrUtil.nullToEmpty(FileNameUtil.extName(file
+            .getOriginalFilename())).toLowerCase(java.util.Locale.ROOT));
     }
 
     @Override
     public FileInfo upload(File file, String parentPath, String storageCode) {
-        return this.upload(file, parentPath, storageCode, FileNameUtil.extName(file.getName()));
+        return this.upload(file, parentPath, storageCode, StrUtil.nullToEmpty(FileNameUtil.extName(file.getName()))
+            .toLowerCase(java.util.Locale.ROOT));
     }
 
     @Override

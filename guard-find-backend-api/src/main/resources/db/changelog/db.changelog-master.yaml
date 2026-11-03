@@ -28,3 +28,6 @@ databaseChangeLog:
 #      file: db/changelog/postgresql/plugin/plugin_schedule.sql
 #  - include:
 #      file: db/changelog/postgresql/plugin/plugin_generator.sql
+
+  - include:
+      file: db/changelog/mysql/miniapp_property.sql
