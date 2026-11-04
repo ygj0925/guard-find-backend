@@ -17,7 +17,6 @@
 package com.guardfind.backend.system.controller;
 
 import cn.dev33.satoken.annotation.SaIgnore;
-import cn.hutool.core.util.StrUtil;
 import com.alicp.jetcache.anno.Cached;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -31,7 +30,6 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import com.guardfind.backend.common.constant.CacheConstants;
 import com.guardfind.backend.system.enums.OptionCategoryEnum;
-import com.guardfind.backend.system.model.query.OptionQuery;
 import com.guardfind.backend.system.model.resp.file.FileUploadResp;
 import com.guardfind.backend.system.service.*;
 import top.continew.starter.core.util.validation.ValidationUtils;
@@ -85,16 +83,15 @@ public class CommonController {
 
     @TenantIgnore
     @SaIgnore
-    @Operation(summary = "查询系统配置参数", description = "查询系统配置参数")
+    @Operation(summary = "查询系统配置参数", description = "公开查询站点名称、描述、版权、备案号、图标和 LOGO，无需登录或配置管理权限")
     @GetMapping("/dict/option/site")
-    @Cached(key = "'SITE'", name = CacheConstants.OPTION_KEY_PREFIX)
     public List<LabelValueResp<String>> listSiteOptionDict() {
-        OptionQuery optionQuery = new OptionQuery();
-        optionQuery.setCategory(OptionCategoryEnum.SITE.name());
-        return optionService.list(optionQuery)
+        // 只公开品牌信息，不能复用有后台权限检查的参数管理列表，也不暴露其他类别配置。
+        var site = optionService.getByCategory(OptionCategoryEnum.SITE);
+        return List.of("SITE_TITLE", "SITE_DESCRIPTION", "SITE_COPYRIGHT", "SITE_BEIAN", "SITE_FAVICON", "SITE_LOGO")
             .stream()
-            .map(option -> new LabelValueResp<>(option.getCode(), StrUtil.nullToDefault(option.getValue(), option
-                .getDefaultValue())))
+            .filter(site::containsKey)
+            .map(code -> new LabelValueResp<>(code, site.get(code)))
             .toList();
     }
 

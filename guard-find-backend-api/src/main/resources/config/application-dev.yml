@@ -6,7 +6,7 @@ application:
 --- ### 服务器配置
 server:
   # HTTP 端口（默认 8080）
-  port: 8000
+  port: 9090
 
 --- ### 数据源配置
 spring.datasource:

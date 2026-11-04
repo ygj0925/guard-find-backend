@@ -27,6 +27,8 @@ import com.baomidou.mybatisplus.extension.conditions.update.LambdaUpdateChainWra
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import com.guardfind.backend.common.constant.CacheConstants;
 import com.guardfind.backend.system.enums.OptionCategoryEnum;
 import com.guardfind.backend.system.enums.PasswordPolicyEnum;
@@ -111,8 +113,8 @@ public class OptionServiceImpl implements OptionService {
             PasswordPolicyEnum passwordPolicy = PasswordPolicyEnum.valueOf(code);
             passwordPolicy.validateRange(Integer.parseInt(value), passwordPolicyOptionMap);
         }
-        RedisUtils.deleteByPattern(CacheConstants.OPTION_KEY_PREFIX + StringConstants.ASTERISK);
         baseMapper.updateById(BeanUtil.copyToList(options, OptionDO.class));
+        invalidateCacheAfterCommit();
     }
 
     @Override
@@ -131,7 +133,6 @@ public class OptionServiceImpl implements OptionService {
         baseMapper.selectList(QueryWrapperHelper.build(query))
             .forEach(option -> StpUtil.checkPermission(OptionCategoryEnum.valueOf(option.getCategory())
                 .permission("update")));
-        RedisUtils.deleteByPattern(CacheConstants.OPTION_KEY_PREFIX + StringConstants.ASTERISK);
         LambdaUpdateChainWrapper<OptionDO> updateWrapper = baseMapper.lambdaUpdate().set(OptionDO::getValue, null);
         if (StrUtil.isNotBlank(category)) {
             updateWrapper.eq(OptionDO::getCategory, category);
@@ -139,6 +140,23 @@ public class OptionServiceImpl implements OptionService {
             updateWrapper.in(OptionDO::getCode, req.getCode());
         }
         updateWrapper.update();
+        invalidateCacheAfterCommit();
+    }
+
+    private void invalidateCacheAfterCommit() {
+        Runnable invalidate = () -> RedisUtils.deleteByPattern(CacheConstants.OPTION_KEY_PREFIX
+            + StringConstants.ASTERISK);
+        if (TransactionSynchronizationManager.isActualTransactionActive()
+            && TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    invalidate.run();
+                }
+            });
+        } else {
+            invalidate.run();
+        }
     }
 
     @Override
