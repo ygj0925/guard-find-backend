@@ -175,4 +175,21 @@ class ImRegressionTest {
         admin.conversations(null, query);
         verify(support).countConversations("张!%!_!!", null, false);
     }
+
+    @Test
+    void adminMessagesFirstPageTakesNewestAndIncrementalTakesAfterCursor() {
+        when(support.selectList(any())).thenReturn(List.of());
+        var admin = new AdminImServiceImpl(support, users, mock(ObjectProvider.class), mock(ObjectProvider.class));
+
+        admin.messages(9L, null);
+        admin.messages(9L, 50L);
+
+        var captor = org.mockito.ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.Wrapper.class);
+        verify(support, org.mockito.Mockito.times(2)).selectList(captor.capture());
+        var sqls = captor.getAllValues().stream().map(w -> w.getSqlSegment()).toList();
+        // 首次进入必须倒序取最近一屏,否则长会话首屏拿到的是最早的 100 条
+        assertTrue(sqls.get(0).contains("DESC"), sqls.get(0));
+        // 带游标时必须升序取游标之后的一批
+        assertTrue(sqls.get(1).contains("ASC"), sqls.get(1));
+    }
 }

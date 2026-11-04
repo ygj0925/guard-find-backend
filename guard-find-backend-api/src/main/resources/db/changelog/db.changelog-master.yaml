@@ -35,3 +35,5 @@ databaseChangeLog:
       file: db/changelog/mysql/property_operation_pages.sql
   - include:
       file: db/changelog/mysql/property_optional_owner.sql
+  - include:
+      file: db/changelog/mysql/property_publisher_manager.sql

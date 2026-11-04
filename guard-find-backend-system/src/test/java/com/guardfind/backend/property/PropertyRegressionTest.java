@@ -69,7 +69,17 @@ class PropertyRegressionTest {
         interactions = mock(PropertyInteractionService.class);
         service = new PropertyServiceImpl(properties, users, interactions);
         interaction = new PropertyInteractionServiceImpl(properties, favorites, history, bookings, users, notices);
+        // 2L 默认是房源管家:发布/编辑/上下架在小程序侧都要求管家身份(房源仅运营方维护)
+        when(users.selectById(2L)).thenReturn(publisher(2L, true));
         MiniappUserContextHolder.clear();
+    }
+
+    MiniappUserDO publisher(Long id, boolean manager) {
+        var user = new MiniappUserDO();
+        user.setId(id);
+        user.setIsPropertyManager(manager ? 1 : 0);
+        user.setAccountStatus(1);
+        return user;
     }
 
     @AfterEach
@@ -172,6 +182,39 @@ class PropertyRegressionTest {
         r.setStatus(4);
         assertThrows(BusinessException.class, () -> service.create(2L, r));
         verify(properties, never()).insert(any(PropertyDO.class));
+    }
+
+    @Test
+    void plainUserCannotPublishProperty() {
+        when(users.selectById(7L)).thenReturn(publisher(7L, false));
+        assertThrows(BusinessException.class, () -> service.create(7L, req()));
+        verify(properties, never()).insert(any(PropertyDO.class));
+    }
+
+    @Test
+    void plainUserCannotChangeListingStatus() {
+        when(users.selectById(7L)).thenReturn(publisher(7L, false));
+        assertThrows(BusinessException.class, () -> service.updateStatus(10L, 7L, 2));
+        verify(properties, never()).updateById(any(PropertyDO.class));
+    }
+
+    @Test
+    void adminCanCreateWithoutOwnerAndBypassesPublisherGate() {
+        service.createForAdmin(null, req());
+        var cap = ArgumentCaptor.forClass(PropertyDO.class);
+        verify(properties).insert(cap.capture());
+        assertNull(cap.getValue().getUserId());
+        assertEquals(2, cap.getValue().getStatus());
+    }
+
+    @Test
+    void draftDefaultsToStatusOneWhenStatusOmitted() {
+        var r = req();
+        r.setStatus(null);
+        service.create(2L, r);
+        var cap = ArgumentCaptor.forClass(PropertyDO.class);
+        verify(properties).insert(cap.capture());
+        assertEquals(1, cap.getValue().getStatus());
     }
 
     @Test

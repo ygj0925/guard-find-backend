@@ -38,6 +38,7 @@ import top.continew.starter.extension.crud.model.query.PageQuery;
 import top.continew.starter.extension.crud.model.resp.PageResp;
 
 import java.time.LocalDateTime;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -116,11 +117,18 @@ public class AdminImServiceImpl implements AdminImService {
 
     @Override
     public List<AdminMessageResp> messages(Long userId, Long afterId) {
-        List<AdminMessageDO> msgs = adminMessageMapper.selectList(Wrappers.<AdminMessageDO>lambdaQuery()
-            .eq(AdminMessageDO::getUserId, userId)
-            .gt(afterId != null && afterId > 0, AdminMessageDO::getId, afterId)
-            .orderByAsc(AdminMessageDO::getId)
-            .last("LIMIT 100"));
+        // 带 afterId 是增量轮询,按 id 升序取游标之后的一批;
+        // 不带则是首次进入会话,必须取"最近"100 条(倒序取一屏再转正序),否则会拿到会话最早的 100 条
+        List<AdminMessageDO> msgs = afterId != null && afterId > 0
+            ? adminMessageMapper.selectList(Wrappers.<AdminMessageDO>lambdaQuery()
+                .eq(AdminMessageDO::getUserId, userId)
+                .gt(AdminMessageDO::getId, afterId)
+                .orderByAsc(AdminMessageDO::getId)
+                .last("LIMIT 100"))
+            : adminMessageMapper.selectList(Wrappers.<AdminMessageDO>lambdaQuery()
+                .eq(AdminMessageDO::getUserId, userId)
+                .orderByDesc(AdminMessageDO::getId)
+                .last("LIMIT 100")).stream().sorted(Comparator.comparing(AdminMessageDO::getId)).toList();
         // 拉取即把用户发来的未读标已读
         if (!msgs.isEmpty())
             adminMessageMapper.update(null, Wrappers.<AdminMessageDO>update()

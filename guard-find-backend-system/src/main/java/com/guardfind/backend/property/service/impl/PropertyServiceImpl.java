@@ -57,10 +57,28 @@ public class PropertyServiceImpl implements PropertyService {
 
     @Override
     public Long create(Long userId, PropertyReq req) {
+        assertPublisher(userId);
+        return doCreate(userId, req);
+    }
+
+    /**
+     * 房源是运营方(泊智湾管家)维护的公开内容,小程序虽然开放注册,但不能让任意用户往公开池里塞房源。
+     * 后台路径 createForAdmin/updateForAdmin 等不走这里,仍可按权限码维护(含未绑定房东的房源)。
+     */
+    private void assertPublisher(Long userId) {
+        MiniappUserDO user = userId == null ? null : appUserMapper.selectById(userId);
+        if (user == null || !Integer.valueOf(1).equals(user.getIsPropertyManager())) {
+            throw new BusinessException("仅房源管家可发布或维护房源");
+        }
+    }
+
+    private Long doCreate(Long userId, PropertyReq req) {
         PropertyDO property = new PropertyDO();
         applyReq(property, req);
         property.setUserId(userId);
-        property.setStatus(req.getStatus() != null ? req.getStatus() : 1);
+        if (property.getStatus() == null) {
+            property.setStatus(1);
+        }
         property.setViewCount(0);
         propertyMapper.insert(property);
         return property.getId();
@@ -125,6 +143,7 @@ public class PropertyServiceImpl implements PropertyService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void update(Long id, Long userId, PropertyReq req) {
+        assertPublisher(userId);
         PropertyDO property = getOwned(id, userId);
         applyReq(property, req);
         propertyMapper.updateById(property);
@@ -133,6 +152,7 @@ public class PropertyServiceImpl implements PropertyService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void delete(Long id, Long userId) {
+        assertPublisher(userId);
         PropertyDO property = getOwned(id, userId);
         interactionService.cleanupForDelete(id);
         propertyMapper.deleteById(property.getId());
@@ -141,6 +161,7 @@ public class PropertyServiceImpl implements PropertyService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void updateStatus(Long id, Long userId, Integer status) {
+        assertPublisher(userId);
         PropertyDO property = getOwned(id, userId);
         if (status == null || status < 1 || status > 3) {
             throw new BusinessException("状态取值不合法");
@@ -233,7 +254,7 @@ public class PropertyServiceImpl implements PropertyService {
             if (owner == null || !Integer.valueOf(1).equals(owner.getAccountStatus()))
                 throw new BusinessException("请选择有效的小程序房东用户");
         }
-        return create(ownerId, req);
+        return doCreate(ownerId, req);
     }
 
     @Override
@@ -274,9 +295,13 @@ public class PropertyServiceImpl implements PropertyService {
         if (req.getImages() != null && req.getImages().size() > 9)
             throw new BusinessException("图片最多 9 张");
         property.setImages(JSONUtil.toJsonStr(req.getImages() == null ? List.of() : req.getImages()));
-        if (req.getStatus() == null || req.getStatus() < 1 || req.getStatus() > 3)
-            throw new BusinessException("状态取值不合法");
-        property.setStatus(req.getStatus());
+        // status 允许省略:新增时由 doCreate 默认草稿,编辑时保持原状态不被清空
+        if (req.getStatus() != null) {
+            if (req.getStatus() < 1 || req.getStatus() > 3) {
+                throw new BusinessException("状态取值不合法");
+            }
+            property.setStatus(req.getStatus());
+        }
     }
 
     private PropertyDO getOwned(Long id, Long userId) {
