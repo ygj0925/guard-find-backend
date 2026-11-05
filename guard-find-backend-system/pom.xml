@@ -26,6 +26,22 @@
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- 9.1 仅测试范围验证引擎与 Boot/Jakarta 兼容性，生产接入在 9.2 决定模块归属 -->
+        <dependency>
+            <groupId>org.flowable</groupId>
+            <artifactId>flowable-spring-boot-starter-process</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.flowable</groupId>
+            <artifactId>flowable-spring-configurator</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.flowable</groupId>
+            <artifactId>flowable-app-engine-spring</artifactId>
+            <scope>test</scope>
+        </dependency>
         <!-- 公共模块 -->
         <dependency>
             <groupId>com.guardfind.backend</groupId>

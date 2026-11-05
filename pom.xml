@@ -37,6 +37,8 @@
         <skipTests>true</skipTests>
         <!-- 项目版本号 -->
         <revision>4.2.0-SNAPSHOT</revision>
+        <!-- BPMN 引擎候选版本，9.1 仅用于隔离兼容性测试，生产接入见 9.2 -->
+        <flowable.version>7.2.0</flowable.version>
     </properties>
 
     <!-- 全局依赖版本管理 -->
@@ -89,6 +91,26 @@
                 <groupId>com.guardfind.backend</groupId>
                 <artifactId>guard-find-backend-plugin-generator</artifactId>
                 <version>${revision}</version>
+            </dependency>
+
+            <!-- BPMN 引擎（Apache-2.0）。7.2.0 的 BOM 基于 Boot 3.5.4 / Spring 6.2.10，
+                 与本项目 Boot 3.4.10 / Spring 6.2.x 同代；实际兼容性由隔离测试验证。 -->
+            <dependency>
+                <groupId>org.flowable</groupId>
+                <artifactId>flowable-spring-boot-starter-process</artifactId>
+                <version>${flowable.version}</version>
+            </dependency>
+            <!-- process starter 未传递 spring-configurator，自动配置内嵌 App 配置需要它 -->
+            <dependency>
+                <groupId>org.flowable</groupId>
+                <artifactId>flowable-spring-configurator</artifactId>
+                <version>${flowable.version}</version>
+            </dependency>
+            <!-- 7.2.0 的 ProcessEngineAppConfiguration 在类初始化时直接引用 App 引擎类型 -->
+            <dependency>
+                <groupId>org.flowable</groupId>
+                <artifactId>flowable-app-engine-spring</artifactId>
+                <version>${flowable.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
