@@ -96,6 +96,12 @@ public class ImController {
         imService.delete(id);
     }
 
+    @Operation(summary = "联系客服-未读数", description = "当前用户收到的未读客服消息数,不标记已读")
+    @GetMapping("/support/unread")
+    public long supportUnread() {
+        return imService.supportUnread();
+    }
+
     @Operation(summary = "联系客服-拉取消息", description = "我与官方客服的消息,afterId 增量;客服消息 senderId=0")
     @Parameter(name = "afterId", description = "此 ID 之后的消息,增量拉取")
     @GetMapping("/support/messages")

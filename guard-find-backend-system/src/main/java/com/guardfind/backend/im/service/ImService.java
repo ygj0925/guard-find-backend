@@ -58,6 +58,11 @@ public interface ImService {
     void delete(Long conversationId);
 
     /**
+     * 联系客服:当前用户收到的未读客服消息数,只读且不标记已读。
+     */
+    long supportUnread();
+
+    /**
      * 联系客服:拉取我与官方客服的消息(可选 afterId 增量);拉取即把客服回复标已读。
      * senderId 固定映射:自己的消息为本人 ID,客服消息为 0。
      */

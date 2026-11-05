@@ -252,6 +252,15 @@ public class ImServiceImpl implements ImService {
     }
 
     @Override
+    public long supportUnread() {
+        Long userId = MiniappUserContextHolder.getUserIdRequired();
+        return adminMessageMapper.selectCount(Wrappers.<AdminMessageDO>lambdaQuery()
+            .eq(AdminMessageDO::getUserId, userId)
+            .eq(AdminMessageDO::getSenderType, "ADMIN")
+            .eq(AdminMessageDO::getIsRead, 0));
+    }
+
+    @Override
     public List<ImMessageResp> supportMessages(Long afterId) {
         Long userId = MiniappUserContextHolder.getUserIdRequired();
         List<AdminMessageDO> msgs = adminMessageMapper.selectList(Wrappers.<AdminMessageDO>lambdaQuery()
