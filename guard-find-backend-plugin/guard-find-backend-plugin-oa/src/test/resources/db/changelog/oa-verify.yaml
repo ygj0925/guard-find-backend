@@ -5,3 +5,7 @@ databaseChangeLog:
       file: db/changelog/mysql/oa/oa_engine_process.sql
   - include:
       file: db/changelog/mysql/oa/oa_engine_history.sql
+  - include:
+      file: db/changelog/mysql/oa/oa_process.sql
+  - include:
+      file: db/changelog/mysql/oa/oa_form.sql

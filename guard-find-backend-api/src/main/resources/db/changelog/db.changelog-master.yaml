@@ -44,3 +44,8 @@ databaseChangeLog:
       file: classpath:db/changelog/mysql/oa/oa_engine_process.sql
   - include:
       file: classpath:db/changelog/mysql/oa/oa_engine_history.sql
+  # OA 业务表：流程模型/发布版本、表单版本
+  - include:
+      file: classpath:db/changelog/mysql/oa/oa_process.sql
+  - include:
+      file: classpath:db/changelog/mysql/oa/oa_form.sql
