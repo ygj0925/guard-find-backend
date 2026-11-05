@@ -133,6 +133,24 @@ class OaEngineLiquibaseMySqlTest {
                 .isInstanceOf(SQLException.class)
                 .hasMessageContaining("Duplicate entry");
             execute(connection, ccReceipt(TEST_TENANT_B, 9901L, 1L));
+
+            execute(connection, attachment(TEST_TENANT_A, 9901L, 8801L));
+            assertThatThrownBy(() -> execute(connection, attachment(TEST_TENANT_A, 9901L, 8801L)))
+                .isInstanceOf(SQLException.class)
+                .hasMessageContaining("Duplicate entry");
+            execute(connection, attachment(TEST_TENANT_B, 9902L, 8801L));
+
+            execute(connection, outbox(TEST_TENANT_A, "oa-test-event-1"));
+            assertThatThrownBy(() -> execute(connection, outbox(TEST_TENANT_B, "oa-test-event-1")))
+                .isInstanceOf(SQLException.class)
+                .hasMessageContaining("Duplicate entry");
+
+            execute(connection, dedup(TEST_TENANT_A, 1L, "APPROVE", "oa-test-dedup-1"));
+            assertThatThrownBy(() -> execute(connection, dedup(TEST_TENANT_A, 1L, "APPROVE", "oa-test-dedup-1")))
+                .isInstanceOf(SQLException.class)
+                .hasMessageContaining("Duplicate entry");
+            execute(connection, dedup(TEST_TENANT_A, 1L, "SUBMIT", "oa-test-dedup-1"));
+            execute(connection, dedup(TEST_TENANT_B, 1L, "APPROVE", "oa-test-dedup-1"));
         }
     }
 
@@ -169,11 +187,24 @@ class OaEngineLiquibaseMySqlTest {
             .contains("application_id", "receiver_id", "source_task_id", "status", "read_time");
         assertThat(indexes(connection, "oa_cc_receipt"))
             .contains("uk_tenant_application_receiver", "idx_tenant_receiver_status");
+        assertThat(columns(connection, "oa_attachment_link"))
+            .contains("tenant_id", "application_id", "business_type", "business_key", "file_id", "file_name", "file_size", "content_type", "category", "scan_status", "available", "create_user", "deleted");
+        assertThat(indexes(connection, "oa_attachment_link"))
+            .contains("uk_tenant_file", "idx_tenant_application", "idx_tenant_business", "idx_tenant_scan");
+        assertThat(columns(connection, "oa_outbox"))
+            .contains("tenant_id", "event_id", "aggregate_type", "aggregate_id", "event_type", "payload", "status", "retry_count", "next_retry_time", "last_error", "sent_time");
+        assertThat(indexes(connection, "oa_outbox"))
+            .contains("uk_event_id", "idx_status_retry", "idx_tenant_aggregate");
+        assertThat(columns(connection, "oa_request_dedup"))
+            .contains("tenant_id", "actor_id", "command", "request_id", "status", "result_json", "expire_time");
+        assertThat(indexes(connection, "oa_request_dedup"))
+            .contains("uk_tenant_actor_command_request", "idx_expire_time");
     }
 
     private static void clearTestData(Connection connection) throws SQLException {
-        for (String table : new String[] {"oa_cc_receipt", "oa_approval_audit", "oa_application", "oa_process_release",
-            "oa_form_version", "oa_form", "oa_process_model"}) {
+        for (String table : new String[] {"oa_request_dedup", "oa_outbox", "oa_attachment_link", "oa_cc_receipt",
+            "oa_approval_audit", "oa_application", "oa_process_release", "oa_form_version", "oa_form",
+            "oa_process_model"}) {
             execute(connection, "DELETE FROM " + table + " WHERE tenant_id IN (" + TEST_TENANT_A + "," + TEST_TENANT_B + ")");
         }
     }
@@ -241,6 +272,21 @@ class OaEngineLiquibaseMySqlTest {
     private static String ccReceipt(long tenantId, long applicationId, long receiverId) {
         return "INSERT INTO oa_cc_receipt (tenant_id, application_id, receiver_id, status, create_time) VALUES (%d, %d, %d, 'UNREAD', NOW())"
             .formatted(tenantId, applicationId, receiverId);
+    }
+
+    private static String attachment(long tenantId, long applicationId, long fileId) {
+        return "INSERT INTO oa_attachment_link (tenant_id, application_id, business_type, business_key, file_id, file_name, scan_status, available, create_user, create_time, deleted) VALUES (%d, %d, 'LEAVE', 'oa-test-1', %d, 'test.pdf', 'CLEAN', 1, 1, NOW(), 0)"
+            .formatted(tenantId, applicationId, fileId);
+    }
+
+    private static String outbox(long tenantId, String eventId) {
+        return "INSERT INTO oa_outbox (tenant_id, event_id, aggregate_type, aggregate_id, event_type, payload, status, retry_count, create_time) VALUES (%d, '%s', 'APPLICATION', '9901', 'APPLICATION_SUBMITTED', '{}', 'PENDING', 0, NOW())"
+            .formatted(tenantId, eventId);
+    }
+
+    private static String dedup(long tenantId, long actorId, String command, String requestId) {
+        return "INSERT INTO oa_request_dedup (tenant_id, actor_id, command, request_id, status, create_time, expire_time) VALUES (%d, %d, '%s', '%s', 'PROCESSING', NOW(), DATE_ADD(NOW(), INTERVAL 1 DAY))"
+            .formatted(tenantId, actorId, command, requestId);
     }
 
     private static String url() {

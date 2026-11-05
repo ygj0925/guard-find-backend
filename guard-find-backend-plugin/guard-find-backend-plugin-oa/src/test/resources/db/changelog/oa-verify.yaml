@@ -15,3 +15,9 @@ databaseChangeLog:
       file: db/changelog/mysql/oa/oa_approval_audit.sql
   - include:
       file: db/changelog/mysql/oa/oa_cc_receipt.sql
+  - include:
+      file: db/changelog/mysql/oa/oa_attachment.sql
+  - include:
+      file: db/changelog/mysql/oa/oa_outbox.sql
+  - include:
+      file: db/changelog/mysql/oa/oa_request_dedup.sql
