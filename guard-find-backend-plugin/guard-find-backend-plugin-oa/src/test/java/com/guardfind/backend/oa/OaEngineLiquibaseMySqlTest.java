@@ -112,6 +112,27 @@ class OaEngineLiquibaseMySqlTest {
             assertThatThrownBy(() -> execute(connection, release(TEST_TENANT_B, 9902L, 1, "oa-test:1:9901")))
                 .isInstanceOf(SQLException.class)
                 .hasMessageContaining("Duplicate entry");
+
+            execute(connection, application(TEST_TENANT_A, "oa-test-1", "oa-test-instance-1"));
+            assertThatThrownBy(() -> execute(connection, application(TEST_TENANT_A, "oa-test-1", "oa-test-instance-2")))
+                .isInstanceOf(SQLException.class)
+                .hasMessageContaining("Duplicate entry");
+            execute(connection, application(TEST_TENANT_B, "oa-test-1", "oa-test-instance-3"));
+            assertThatThrownBy(() -> execute(connection, application(TEST_TENANT_A, "oa-test-2", "oa-test-instance-1")))
+                .isInstanceOf(SQLException.class)
+                .hasMessageContaining("Duplicate entry");
+
+            execute(connection, audit(TEST_TENANT_A, 9901L, "oa-test-request-1"));
+            assertThatThrownBy(() -> execute(connection, audit(TEST_TENANT_A, 9901L, "oa-test-request-1")))
+                .isInstanceOf(SQLException.class)
+                .hasMessageContaining("Duplicate entry");
+            execute(connection, audit(TEST_TENANT_B, 9901L, "oa-test-request-1"));
+
+            execute(connection, ccReceipt(TEST_TENANT_A, 9901L, 1L));
+            assertThatThrownBy(() -> execute(connection, ccReceipt(TEST_TENANT_A, 9901L, 1L)))
+                .isInstanceOf(SQLException.class)
+                .hasMessageContaining("Duplicate entry");
+            execute(connection, ccReceipt(TEST_TENANT_B, 9901L, 1L));
         }
     }
 
@@ -136,10 +157,23 @@ class OaEngineLiquibaseMySqlTest {
             .contains("uk_tenant_model_version", "uk_engine_definition", "idx_tenant_key_status");
         assertThat(indexes(connection, "oa_form")).contains("uk_tenant_form_key");
         assertThat(indexes(connection, "oa_form_version")).contains("uk_tenant_form_version");
+        assertThat(columns(connection, "oa_application"))
+            .contains("tenant_id", "business_type", "business_key", "applicant_id", "applicant_dept_id", "release_id", "form_version_id", "form_data", "process_instance_id", "status", "version", "deleted");
+        assertThat(indexes(connection, "oa_application"))
+            .contains("uk_tenant_business", "uk_process_instance", "idx_tenant_applicant", "idx_tenant_status_time");
+        assertThat(columns(connection, "oa_approval_audit"))
+            .contains("application_id", "process_instance_id", "task_id", "action", "operator_id", "original_assignee_id", "request_id", "detail_json", "create_time");
+        assertThat(indexes(connection, "oa_approval_audit"))
+            .contains("uk_tenant_request", "idx_tenant_application_time", "idx_tenant_operator");
+        assertThat(columns(connection, "oa_cc_receipt"))
+            .contains("application_id", "receiver_id", "source_task_id", "status", "read_time");
+        assertThat(indexes(connection, "oa_cc_receipt"))
+            .contains("uk_tenant_application_receiver", "idx_tenant_receiver_status");
     }
 
     private static void clearTestData(Connection connection) throws SQLException {
-        for (String table : new String[] {"oa_process_release", "oa_form_version", "oa_form", "oa_process_model"}) {
+        for (String table : new String[] {"oa_cc_receipt", "oa_approval_audit", "oa_application", "oa_process_release",
+            "oa_form_version", "oa_form", "oa_process_model"}) {
             execute(connection, "DELETE FROM " + table + " WHERE tenant_id IN (" + TEST_TENANT_A + "," + TEST_TENANT_B + ")");
         }
     }
@@ -192,6 +226,21 @@ class OaEngineLiquibaseMySqlTest {
     private static String release(long tenantId, long modelId, int releaseVersion, String definitionId) {
         return "INSERT INTO oa_process_release (tenant_id, model_id, release_version, bpmn_xml, xml_digest, engine_definition_id, process_definition_key, process_definition_version, form_version_id, form_version, status, published_by, publish_time) VALUES (%d, %d, %d, '<definitions/>', 'digest', '%s', 'oaApproval', 1, 9901, 1, 'ACTIVE', 1, NOW())"
             .formatted(tenantId, modelId, releaseVersion, definitionId);
+    }
+
+    private static String application(long tenantId, String businessKey, String instanceId) {
+        return "INSERT INTO oa_application (tenant_id, business_type, business_key, title, applicant_id, release_id, form_version_id, form_version, process_instance_id, status, version, create_user, create_time, deleted) VALUES (%d, 'LEAVE', '%s', '测试申请', 1, 9901, 9901, 1, '%s', 'RUNNING', 0, 1, NOW(), 0)"
+            .formatted(tenantId, businessKey, instanceId);
+    }
+
+    private static String audit(long tenantId, long applicationId, String requestId) {
+        return "INSERT INTO oa_approval_audit (tenant_id, application_id, process_instance_id, task_id, action, operator_id, request_id, create_time) VALUES (%d, %d, 'oa-test-instance-%d', 'task-1', 'APPROVE', 1, '%s', NOW())"
+            .formatted(tenantId, applicationId, tenantId, requestId);
+    }
+
+    private static String ccReceipt(long tenantId, long applicationId, long receiverId) {
+        return "INSERT INTO oa_cc_receipt (tenant_id, application_id, receiver_id, status, create_time) VALUES (%d, %d, %d, 'UNREAD', NOW())"
+            .formatted(tenantId, applicationId, receiverId);
     }
 
     private static String url() {

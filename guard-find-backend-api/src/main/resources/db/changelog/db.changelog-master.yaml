@@ -49,3 +49,10 @@ databaseChangeLog:
       file: classpath:db/changelog/mysql/oa/oa_process.sql
   - include:
       file: classpath:db/changelog/mysql/oa/oa_form.sql
+  # OA 申请、审批审计与抄送
+  - include:
+      file: classpath:db/changelog/mysql/oa/oa_application.sql
+  - include:
+      file: classpath:db/changelog/mysql/oa/oa_approval_audit.sql
+  - include:
+      file: classpath:db/changelog/mysql/oa/oa_cc_receipt.sql
