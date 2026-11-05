@@ -33,6 +33,7 @@ import com.guardfind.backend.system.service.UserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import top.continew.starter.core.exception.BusinessException;
 import top.continew.starter.extension.crud.model.query.PageQuery;
 import top.continew.starter.extension.crud.model.resp.PageResp;
@@ -141,6 +142,7 @@ public class AdminImServiceImpl implements AdminImService {
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public AdminMessageResp send(Long userId, String content) {
         if (StrUtil.isBlank(content)) {
             throw new BusinessException("消息内容不能为空");

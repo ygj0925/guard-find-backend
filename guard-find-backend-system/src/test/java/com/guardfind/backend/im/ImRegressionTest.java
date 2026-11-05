@@ -18,16 +18,23 @@ package com.guardfind.backend.im;
 
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
+import cn.dev33.satoken.stp.StpUtil;
 import com.guardfind.backend.im.mapper.*;
 import com.guardfind.backend.im.model.entity.*;
 import com.guardfind.backend.im.service.impl.*;
+import com.guardfind.backend.im.websocket.ImWebSocketHandler;
 import com.guardfind.backend.miniapp.context.MiniappUserContextHolder;
 import com.guardfind.backend.miniapp.exception.MiniappBizException;
 import com.guardfind.backend.miniapp.mapper.MiniappUserMapper;
+import com.guardfind.backend.miniapp.model.entity.MiniappUserDO;
 import com.guardfind.backend.miniapp.service.MiniappNoticeService;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.*;
+import org.mockito.MockedStatic;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -191,5 +198,85 @@ class ImRegressionTest {
         assertTrue(sqls.get(0).contains("DESC"), sqls.get(0));
         // 带游标时必须升序取游标之后的一批
         assertTrue(sqls.get(1).contains("ASC"), sqls.get(1));
+    }
+
+    @Test
+    void adminSendIsTransactionalSoPushWaitsForCommit() throws Exception {
+        var method = AdminImServiceImpl.class.getMethod("send", Long.class, String.class);
+        var tx = method.getAnnotation(Transactional.class);
+        assertNotNull(tx, "send 必须开启事务，否则 AfterCommit 退化为落库前立即推送");
+        assertArrayEquals(new Class<?>[]{Exception.class}, tx.rollbackFor());
+    }
+
+    @Test
+    void adminSendPushRunsOnlyAfterCommit() {
+        var user = new MiniappUserDO();
+        user.setId(9L);
+        user.setAccountStatus(1);
+        when(users.selectById(9L)).thenReturn(user);
+        doAnswer(invocation -> {
+            ((AdminMessageDO) invocation.getArgument(0)).setId(77L);
+            return 1;
+        }).when(support).insert(any(AdminMessageDO.class));
+        var ws = mock(ImWebSocketHandler.class);
+        ObjectProvider<ImWebSocketHandler> wsProvider = mock(ObjectProvider.class);
+        when(wsProvider.getIfAvailable()).thenReturn(ws);
+        var admin = new AdminImServiceImpl(support, users, mock(ObjectProvider.class), wsProvider);
+
+        TransactionSynchronizationManager.initSynchronization();
+        try (MockedStatic<StpUtil> stp = mockStatic(StpUtil.class)) {
+            stp.when(StpUtil::getLoginIdAsLong).thenReturn(5L);
+            admin.send(9L, "  您好  ");
+            // 事务未提交时只能落库，不能提前把消息推给用户
+            verify(ws, never()).pushAdminMessage(anyLong(), anyLong(), anyString(), anyString());
+            TransactionSynchronizationManager.getSynchronizations()
+                .forEach(TransactionSynchronization::afterCommit);
+            verify(ws).pushAdminMessage(9L, 77L, "您好", "官方客服");
+        }
+        finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
+    }
+
+    @Test
+    void adminSendRollbackNeverPushes() {
+        var user = new MiniappUserDO();
+        user.setId(9L);
+        user.setAccountStatus(1);
+        when(users.selectById(9L)).thenReturn(user);
+        var ws = mock(ImWebSocketHandler.class);
+        ObjectProvider<ImWebSocketHandler> wsProvider = mock(ObjectProvider.class);
+        when(wsProvider.getIfAvailable()).thenReturn(ws);
+        var admin = new AdminImServiceImpl(support, users, mock(ObjectProvider.class), wsProvider);
+
+        TransactionSynchronizationManager.initSynchronization();
+        try (MockedStatic<StpUtil> stp = mockStatic(StpUtil.class)) {
+            stp.when(StpUtil::getLoginIdAsLong).thenReturn(5L);
+            admin.send(9L, "回滚消息");
+            TransactionSynchronizationManager.getSynchronizations().forEach(sync -> {
+                sync.afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK);
+            });
+            verify(ws, never()).pushAdminMessage(anyLong(), anyLong(), anyString(), anyString());
+        }
+        finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
+    }
+
+    @Test
+    void adminCannotSendToDisabledOrMissingUser() {
+        var disabled = new MiniappUserDO();
+        disabled.setId(9L);
+        disabled.setAccountStatus(0);
+        when(users.selectById(9L)).thenReturn(disabled);
+        when(users.selectById(10L)).thenReturn(null);
+        var admin = new AdminImServiceImpl(support, users, mock(ObjectProvider.class), mock(ObjectProvider.class));
+
+        try (MockedStatic<StpUtil> stp = mockStatic(StpUtil.class)) {
+            stp.when(StpUtil::getLoginIdAsLong).thenReturn(5L);
+            assertThrows(top.continew.starter.core.exception.BusinessException.class, () -> admin.send(9L, "hi"));
+            assertThrows(top.continew.starter.core.exception.BusinessException.class, () -> admin.send(10L, "hi"));
+        }
+        verify(support, never()).insert(any(AdminMessageDO.class));
     }
 }
