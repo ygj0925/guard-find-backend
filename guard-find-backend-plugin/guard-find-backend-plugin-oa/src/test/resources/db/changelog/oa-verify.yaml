@@ -1,0 +1,7 @@
+databaseChangeLog:
+  - include:
+      file: db/changelog/mysql/oa/oa_engine_common.sql
+  - include:
+      file: db/changelog/mysql/oa/oa_engine_process.sql
+  - include:
+      file: db/changelog/mysql/oa/oa_engine_history.sql

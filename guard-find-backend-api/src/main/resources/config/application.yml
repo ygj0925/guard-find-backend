@@ -380,3 +380,23 @@ miniapp:
   wechat:
     app-id: ${MINIAPP_WECHAT_APP_ID:}
     app-secret: ${MINIAPP_WECHAT_APP_SECRET:}
+
+--- ### OA/BPMN 引擎
+# 引擎表由 Liquibase 托管（db/changelog/mysql/oa），禁止改回自动建表。
+flowable:
+  database-schema-update: false
+  # 异步执行器与定时器恢复在后续审批批次启用，先保持关闭避免后台线程提前运行
+  async-executor-activate: false
+  history-level: full
+  process:
+    enabled: true
+  app:
+    enabled: false
+  cmmn:
+    enabled: false
+  dmn:
+    enabled: false
+  idm:
+    enabled: false
+  eventregistry:
+    enabled: false

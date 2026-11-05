@@ -86,6 +86,13 @@
                 <version>${revision}</version>
             </dependency>
 
+            <!-- OA/BPMN 插件 -->
+            <dependency>
+                <groupId>com.guardfind.backend</groupId>
+                <artifactId>guard-find-backend-plugin-oa</artifactId>
+                <version>${revision}</version>
+            </dependency>
+
             <!-- 代码生成器插件（后续会改造为独立插件） -->
             <dependency>
                 <groupId>com.guardfind.backend</groupId>

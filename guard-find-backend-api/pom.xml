@@ -40,6 +40,12 @@
             <artifactId>guard-find-backend-plugin-schedule</artifactId>
         </dependency>
 
+        <!-- OA/BPMN 插件 -->
+        <dependency>
+            <groupId>com.guardfind.backend</groupId>
+            <artifactId>guard-find-backend-plugin-oa</artifactId>
+        </dependency>
+
         <!-- 代码生成器插件 -->
         <dependency>
             <groupId>com.guardfind.backend</groupId>

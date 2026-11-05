@@ -20,6 +20,7 @@
         <module>guard-find-backend-plugin-tenant</module>
         <module>guard-find-backend-plugin-schedule</module>
         <module>guard-find-backend-plugin-generator</module>
+        <module>guard-find-backend-plugin-oa</module>
     </modules>
 
     <dependencies>
