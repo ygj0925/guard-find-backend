@@ -1,3 +1,19 @@
+/*
+ * Copyright (c) 2022-present Charles7c Authors. All Rights Reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.guardfind.backend.system;
 
 import cn.dev33.satoken.stp.StpUtil;
@@ -58,8 +74,8 @@ class SiteSettingsTest {
     @Test
     void publicEndpointOnlyExposesAllowlistedBrandingFields() {
         var service = mock(OptionService.class);
-        when(service.getByCategory(com.guardfind.backend.system.enums.OptionCategoryEnum.SITE))
-            .thenReturn(Map.of("SITE_TITLE", "泊之湾", "SITE_LOGO", "", "MAIL_PASSWORD", "secret", "SITE_INTERNAL", "private"));
+        when(service.getByCategory(com.guardfind.backend.system.enums.OptionCategoryEnum.SITE)).thenReturn(Map
+            .of("SITE_TITLE", "泊之湾", "SITE_LOGO", "", "MAIL_PASSWORD", "secret", "SITE_INTERNAL", "private"));
         var controller = new CommonController(mock(FileService.class), mock(DictItemService.class), service);
         var result = controller.listSiteOptionDict();
         assertEquals(List.of("SITE_TITLE", "SITE_LOGO"), result.stream().map(item -> item.getLabel()).toList());
@@ -74,7 +90,7 @@ class SiteSettingsTest {
         var service = new OptionServiceImpl(mapper);
         beginTransaction();
         try (MockedStatic<StpUtil> stp = mockStatic(StpUtil.class);
-             MockedStatic<RedisUtils> redis = mockStatic(RedisUtils.class)) {
+            MockedStatic<RedisUtils> redis = mockStatic(RedisUtils.class)) {
             service.update(List.of(request()));
             verify(mapper).updateById(anyCollection());
             redis.verifyNoInteractions();
@@ -90,7 +106,7 @@ class SiteSettingsTest {
         var service = new OptionServiceImpl(mapper);
         beginTransaction();
         try (MockedStatic<StpUtil> stp = mockStatic(StpUtil.class);
-             MockedStatic<RedisUtils> redis = mockStatic(RedisUtils.class)) {
+            MockedStatic<RedisUtils> redis = mockStatic(RedisUtils.class)) {
             service.update(List.of(request()));
             TransactionSynchronizationManager.getSynchronizations()
                 .forEach(sync -> sync.afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK));
@@ -110,7 +126,7 @@ class SiteSettingsTest {
         req.setCategory("SITE");
         beginTransaction();
         try (MockedStatic<StpUtil> stp = mockStatic(StpUtil.class);
-             MockedStatic<RedisUtils> redis = mockStatic(RedisUtils.class)) {
+            MockedStatic<RedisUtils> redis = mockStatic(RedisUtils.class)) {
             service.resetValue(req);
             verify(update).update();
             redis.verifyNoInteractions();

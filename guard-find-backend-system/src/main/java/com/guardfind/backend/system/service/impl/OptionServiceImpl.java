@@ -144,10 +144,10 @@ public class OptionServiceImpl implements OptionService {
     }
 
     private void invalidateCacheAfterCommit() {
-        Runnable invalidate = () -> RedisUtils.deleteByPattern(CacheConstants.OPTION_KEY_PREFIX
-            + StringConstants.ASTERISK);
-        if (TransactionSynchronizationManager.isActualTransactionActive()
-            && TransactionSynchronizationManager.isSynchronizationActive()) {
+        Runnable invalidate = () -> RedisUtils
+            .deleteByPattern(CacheConstants.OPTION_KEY_PREFIX + StringConstants.ASTERISK);
+        if (TransactionSynchronizationManager.isActualTransactionActive() && TransactionSynchronizationManager
+            .isSynchronizationActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
                 public void afterCommit() {
