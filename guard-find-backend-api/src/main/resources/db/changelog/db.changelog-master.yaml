@@ -49,6 +49,9 @@ databaseChangeLog:
       file: classpath:db/changelog/mysql/oa/oa_process.sql
   - include:
       file: classpath:db/changelog/mysql/oa/oa_form.sql
+  # 表单草稿 schema（发布版本仍写入不可变 oa_form_version）
+  - include:
+      file: classpath:db/changelog/mysql/oa/oa_form_draft.sql
   # OA 申请、审批审计与抄送
   - include:
       file: classpath:db/changelog/mysql/oa/oa_application.sql
@@ -69,3 +72,6 @@ databaseChangeLog:
   # OA 流程模型菜单与发布权限
   - include:
       file: classpath:db/changelog/mysql/oa/oa_menu.sql
+  # OA 表单管理菜单与权限
+  - include:
+      file: classpath:db/changelog/mysql/oa/oa_form_menu.sql

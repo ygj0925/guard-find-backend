@@ -16,6 +16,8 @@
 
 package com.guardfind.backend.oa.bpmn;
 
+import com.guardfind.backend.oa.staff.OaAssigneeSpec;
+import com.guardfind.backend.oa.staff.OaAssigneeSpecParser;
 import org.w3c.dom.Attr;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
@@ -136,6 +138,7 @@ public class OaBpmnValidator {
 
         List<String> errors = new ArrayList<>();
         List<Element> elements = new ArrayList<>();
+        List<OaAssigneeSpec> assignees = new ArrayList<>();
         collect(root, 1, elements, errors);
 
         for (Element element : elements) {
@@ -192,7 +195,7 @@ public class OaBpmnValidator {
             if (!isBpmn(element)) {
                 continue;
             }
-            validateElement(element, nodes, flows, errors);
+            validateElement(element, nodes, flows, errors, assignees);
         }
 
         if (nodes.values().stream().noneMatch(node -> "startEvent".equals(localName(node)))) {
@@ -203,7 +206,7 @@ public class OaBpmnValidator {
         }
 
         String processKey = process == null ? null : blankToNull(process.getAttribute("id"));
-        return new OaBpmnValidationResult(errors.isEmpty(), errors, nodes.size(), digest, processKey);
+        return new OaBpmnValidationResult(errors.isEmpty(), errors, nodes.size(), digest, processKey, assignees);
     }
 
     private Element resolveProcess(Element definitions, List<String> errors) {
@@ -248,7 +251,8 @@ public class OaBpmnValidator {
     private void validateElement(Element element,
                                  Map<String, Element> nodes,
                                  Map<String, Element> flows,
-                                 List<String> errors) {
+                                 List<String> errors,
+                                 List<OaAssigneeSpec> assignees) {
         String local = localName(element);
         String id = element.getAttribute("id");
         switch (local) {
@@ -256,7 +260,7 @@ public class OaBpmnValidator {
             case "endEvent" -> validateBoundaryChildren(element, Set.of("incoming"), "结束事件 " + id, errors);
             case "userTask" -> {
                 validateTaskChildren(element, errors);
-                validateUserTask(element, id, errors);
+                validateUserTask(element, id, errors, assignees);
             }
             case "serviceTask" -> {
                 validateTaskChildren(element, errors);
@@ -282,7 +286,7 @@ public class OaBpmnValidator {
         }
     }
 
-    private void validateUserTask(Element element, String id, List<String> errors) {
+    private void validateUserTask(Element element, String id, List<String> errors, List<OaAssigneeSpec> assignees) {
         String assignee = flowableAttribute(element, "assignee");
         String candidateUsers = flowableAttribute(element, "candidateUsers");
         String candidateGroups = flowableAttribute(element, "candidateGroups");
@@ -293,6 +297,26 @@ public class OaBpmnValidator {
         validateAssignment("assignee", assignee, id, errors);
         validateAssignment("candidateUsers", candidateUsers, id, errors);
         validateAssignment("candidateGroups", candidateGroups, id, errors);
+        collectAssignments("assignee", assignee, id, assignees, errors);
+        collectAssignments("candidateUsers", candidateUsers, id, assignees, errors);
+        collectAssignments("candidateGroups", candidateGroups, id, assignees, errors);
+    }
+
+    private void collectAssignments(String name,
+                                    String value,
+                                    String id,
+                                    List<OaAssigneeSpec> assignees,
+                                    List<String> errors) {
+        if (value.isBlank() || value.contains("${")) {
+            return;
+        }
+        for (String token : value.split(",")) {
+            try {
+                OaAssigneeSpecParser.parse(token).ifPresent(assignees::add);
+            } catch (IllegalArgumentException e) {
+                addError(errors, "用户任务 " + id + " 的 " + name + " 配置无效: " + e.getMessage());
+            }
+        }
     }
 
     private void validateServiceTask(Element element, String id, List<String> errors) {

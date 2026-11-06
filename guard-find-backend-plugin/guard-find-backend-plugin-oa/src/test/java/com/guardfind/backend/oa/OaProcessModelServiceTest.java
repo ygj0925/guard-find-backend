@@ -25,6 +25,8 @@ import com.guardfind.backend.oa.model.OaProcessPublishReq;
 import com.guardfind.backend.oa.model.OaProcessPublishResp;
 import com.guardfind.backend.oa.repository.OaProcessModelRepository;
 import com.guardfind.backend.oa.service.OaProcessModelService;
+import com.guardfind.backend.oa.staff.OaAssigneeResolver;
+import com.guardfind.backend.oa.staff.OaStaffDirectory;
 import org.flowable.engine.RepositoryService;
 import org.flowable.engine.RuntimeService;
 import org.flowable.engine.TaskService;
@@ -76,6 +78,21 @@ class OaProcessModelServiceTest {
                           targetNamespace="http://guardfind.com/oa/bpmn">
           <bpmn:process id="broken" isExecutable="true">
             <bpmn:startEvent id="start"/>
+          </bpmn:process>
+        </bpmn:definitions>
+        """;
+
+    private static final String STATIC_ASSIGNEE_BPMN = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                          xmlns:flowable="http://flowable.org/bpmn"
+                          targetNamespace="http://guardfind.com/oa/bpmn">
+          <bpmn:process id="oaStatic" name="静态审批人" isExecutable="true">
+            <bpmn:startEvent id="start"/>
+            <bpmn:sequenceFlow id="flow1" sourceRef="start" targetRef="approve"/>
+            <bpmn:userTask id="approve" name="审批" flowable:assignee="employee:999"/>
+            <bpmn:sequenceFlow id="flow2" sourceRef="approve" targetRef="end"/>
+            <bpmn:endEvent id="end"/>
           </bpmn:process>
         </bpmn:definitions>
         """;
@@ -256,15 +273,69 @@ class OaProcessModelServiceTest {
         });
     }
 
+    @Test
+    void rejectsUnavailableStaticAssigneeBeforeDeployment() {
+        runner().run(context -> {
+            Fixture fixture = fixture(context);
+            insertFormVersion(fixture.jdbc);
+            OaProcessModelResp created = fixture.service
+                .create(101, 7, new OaProcessModelCreateReq("static", "静态审批人", null, null, STATIC_ASSIGNEE_BPMN));
+
+            OaProcessPublishResp result = fixture.service.publish(101, 7, created
+                .id(), new OaProcessPublishReq(9001L, null, null));
+
+            assertThat(result.valid()).isFalse();
+            assertThat(result.errors()).anyMatch(error -> error.contains("不是本租户在职员工"));
+            assertThat(fixture.repositoryService.createDeploymentQuery().deploymentTenantId("101").count()).isZero();
+            assertThat(fixture.service.releases(101, created.id())).isEmpty();
+            assertThat(fixture.service.detail(101, created.id()).status()).isEqualTo("DRAFT");
+        });
+    }
+
     private static Fixture fixture(ConfigurableApplicationContext context) {
         DataSource dataSource = context.getBean(DataSource.class);
         JdbcTemplate jdbc = new JdbcTemplate(dataSource);
         createTables(jdbc);
         OaProcessModelRepository repository = new OaProcessModelRepository(jdbc);
-        OaProcessModelService service = new OaProcessModelService(repository, new OaBpmnValidator(List.of()), context
-            .getBean(RepositoryService.class), context.getBean(PlatformTransactionManager.class));
+        OaProcessModelService service = new OaProcessModelService(repository, new OaBpmnValidator(List
+            .of()), new OaAssigneeResolver(new StubStaffDirectory()), context.getBean(RepositoryService.class), context
+                .getBean(PlatformTransactionManager.class));
         return new Fixture(service, repository, jdbc, context.getBean(RuntimeService.class), context
             .getBean(TaskService.class), context.getBean(RepositoryService.class));
+    }
+
+    /** 静态审批人校验桩：只认 7 号员工与 FINANCE 岗位。 */
+    private static final class StubStaffDirectory implements OaStaffDirectory {
+
+        @Override
+        public boolean activeEmployee(long tenantId, long userId) {
+            return userId == 7L;
+        }
+
+        @Override
+        public Long departmentId(long tenantId, long userId) {
+            return 10L;
+        }
+
+        @Override
+        public Long supervisorId(long tenantId, long userId) {
+            return 7L;
+        }
+
+        @Override
+        public boolean enabledPosition(long tenantId, String code) {
+            return "FINANCE".equals(code);
+        }
+
+        @Override
+        public List<Long> activeUsersByPosition(long tenantId, String code) {
+            return "FINANCE".equals(code) ? List.of(7L) : List.of();
+        }
+
+        @Override
+        public List<Long> departmentLeaders(long tenantId, long departmentId) {
+            return List.of(7L);
+        }
     }
 
     private static void insertFormVersion(JdbcTemplate jdbc) {

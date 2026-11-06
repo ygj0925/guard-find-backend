@@ -25,6 +25,8 @@ import com.guardfind.backend.oa.model.OaProcessPublishReq;
 import com.guardfind.backend.oa.model.OaProcessPublishResp;
 import com.guardfind.backend.oa.model.OaProcessReleaseResp;
 import com.guardfind.backend.oa.repository.OaProcessModelRepository;
+import com.guardfind.backend.oa.staff.OaAssigneeResolver;
+import com.guardfind.backend.oa.staff.OaAssigneeUnavailableException;
 import org.flowable.engine.RepositoryService;
 import org.flowable.engine.repository.Deployment;
 import org.flowable.engine.repository.ProcessDefinition;
@@ -55,15 +57,18 @@ public class OaProcessModelService {
 
     private final OaProcessModelRepository repository;
     private final OaBpmnValidator validator;
+    private final OaAssigneeResolver assigneeResolver;
     private final RepositoryService repositoryService;
     private final TransactionTemplate transactionTemplate;
 
     public OaProcessModelService(OaProcessModelRepository repository,
                                  OaBpmnValidator validator,
+                                 OaAssigneeResolver assigneeResolver,
                                  RepositoryService repositoryService,
                                  PlatformTransactionManager transactionManager) {
         this.repository = repository;
         this.validator = validator;
+        this.assigneeResolver = assigneeResolver;
         this.repositoryService = repositoryService;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
@@ -153,6 +158,11 @@ public class OaProcessModelService {
         OaProcessModelRepository.FormVersion formVersion = repository.formVersion(tenantId, req.formVersionId());
         if (formVersion == null) {
             return OaProcessPublishResp.rejected(List.of("绑定的表单版本不存在或不属于当前租户"));
+        }
+        try {
+            validation.assignees().forEach(spec -> assigneeResolver.validateForPublish(spec, tenantId));
+        } catch (OaAssigneeUnavailableException e) {
+            return OaProcessPublishResp.rejected(List.of(e.getMessage()));
         }
 
         int releaseVersion = repository.nextReleaseVersion(tenantId, id);

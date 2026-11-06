@@ -16,6 +16,8 @@
 
 package com.guardfind.backend.oa.bpmn;
 
+import com.guardfind.backend.oa.staff.OaAssigneeSpec;
+
 import java.util.List;
 
 /**
@@ -26,15 +28,17 @@ import java.util.List;
  * @param nodeCount  流程节点数
  * @param digest     原始 XML 的 SHA-256 十六进制摘要
  * @param processKey 流程定义 key，解析失败时可能为空
+ * @param assignees  带静态来源前缀的审批人配置，发布时用于校验员工/岗位
  */
 public record OaBpmnValidationResult(boolean valid, List<String> errors, int nodeCount, String digest,
-                                     String processKey) {
+                                     String processKey, List<OaAssigneeSpec> assignees) {
 
     public OaBpmnValidationResult {
         errors = errors == null ? List.of() : List.copyOf(errors);
+        assignees = assignees == null ? List.of() : List.copyOf(assignees);
     }
 
     static OaBpmnValidationResult failure(String message, String digest) {
-        return new OaBpmnValidationResult(false, List.of(message), 0, digest, null);
+        return new OaBpmnValidationResult(false, List.of(message), 0, digest, null, List.of());
     }
 }
