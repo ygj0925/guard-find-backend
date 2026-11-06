@@ -66,3 +66,6 @@ databaseChangeLog:
   # OA 员工组织与审批人候选解析
   - include:
       file: classpath:db/changelog/mysql/oa/oa_staff.sql
+  # OA 流程模型菜单与发布权限
+  - include:
+      file: classpath:db/changelog/mysql/oa/oa_menu.sql
