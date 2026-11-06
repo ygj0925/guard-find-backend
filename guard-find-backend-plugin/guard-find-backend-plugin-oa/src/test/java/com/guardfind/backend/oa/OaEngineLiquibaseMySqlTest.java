@@ -51,7 +51,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * 用真实 MySQL 验证 Liquibase 托管的 OA schema：Flowable 7.2.0 引擎表在
- * database-schema-update=false 下可启动，流程模型/表单版本表的租户唯一约束生效。
+ * database-schema-update=false 下可启动，业务表的租户/全局唯一约束生效。
  *
  * 需要显式提供 OA_MYSQL_URL（可带 createDatabaseIfNotExist=true），避免误连开发库。
  */
@@ -151,6 +151,24 @@ class OaEngineLiquibaseMySqlTest {
                 .hasMessageContaining("Duplicate entry");
             execute(connection, dedup(TEST_TENANT_A, 1L, "SUBMIT", "oa-test-dedup-1"));
             execute(connection, dedup(TEST_TENANT_B, 1L, "APPROVE", "oa-test-dedup-1"));
+
+            execute(connection, position(TEST_TENANT_A, "oa-test-pos"));
+            assertThatThrownBy(() -> execute(connection, position(TEST_TENANT_A, "oa-test-pos")))
+                .isInstanceOf(SQLException.class)
+                .hasMessageContaining("Duplicate entry");
+            execute(connection, position(TEST_TENANT_B, "oa-test-pos"));
+
+            execute(connection, employee(TEST_TENANT_A, 7701L));
+            assertThatThrownBy(() -> execute(connection, employee(TEST_TENANT_A, 7701L)))
+                .isInstanceOf(SQLException.class)
+                .hasMessageContaining("Duplicate entry");
+            execute(connection, employee(TEST_TENANT_B, 7701L));
+
+            execute(connection, employeePosition(TEST_TENANT_A, 7701L, 9901L));
+            assertThatThrownBy(() -> execute(connection, employeePosition(TEST_TENANT_A, 7701L, 9901L)))
+                .isInstanceOf(SQLException.class)
+                .hasMessageContaining("Duplicate entry");
+            execute(connection, employeePosition(TEST_TENANT_B, 7701L, 9901L));
         }
     }
 
@@ -199,12 +217,23 @@ class OaEngineLiquibaseMySqlTest {
             .contains("tenant_id", "actor_id", "command", "request_id", "status", "result_json", "expire_time");
         assertThat(indexes(connection, "oa_request_dedup"))
             .contains("uk_tenant_actor_command_request", "idx_expire_time");
+        assertThat(columns(connection, "oa_position"))
+            .contains("tenant_id", "code", "name", "status", "sort", "create_user", "deleted");
+        assertThat(indexes(connection, "oa_position")).contains("uk_tenant_code", "idx_tenant_status");
+        assertThat(columns(connection, "oa_employee"))
+            .contains("tenant_id", "user_id", "employee_no", "supervisor_id", "employment_status", "dept_leader", "hire_date", "leave_date", "deleted");
+        assertThat(indexes(connection, "oa_employee"))
+            .contains("uk_tenant_user", "uk_tenant_employee_no", "idx_tenant_supervisor", "idx_tenant_status");
+        assertThat(columns(connection, "oa_employee_position"))
+            .contains("tenant_id", "user_id", "position_id", "deleted");
+        assertThat(indexes(connection, "oa_employee_position"))
+            .contains("uk_tenant_user_position", "idx_tenant_position");
     }
 
     private static void clearTestData(Connection connection) throws SQLException {
-        for (String table : new String[] {"oa_request_dedup", "oa_outbox", "oa_attachment_link", "oa_cc_receipt",
-            "oa_approval_audit", "oa_application", "oa_process_release", "oa_form_version", "oa_form",
-            "oa_process_model"}) {
+        for (String table : new String[] {"oa_employee_position", "oa_employee", "oa_position", "oa_request_dedup",
+            "oa_outbox", "oa_attachment_link", "oa_cc_receipt", "oa_approval_audit", "oa_application",
+            "oa_process_release", "oa_form_version", "oa_form", "oa_process_model"}) {
             execute(connection, "DELETE FROM " + table + " WHERE tenant_id IN (" + TEST_TENANT_A + "," + TEST_TENANT_B + ")");
         }
     }
@@ -287,6 +316,21 @@ class OaEngineLiquibaseMySqlTest {
     private static String dedup(long tenantId, long actorId, String command, String requestId) {
         return "INSERT INTO oa_request_dedup (tenant_id, actor_id, command, request_id, status, create_time, expire_time) VALUES (%d, %d, '%s', '%s', 'PROCESSING', NOW(), DATE_ADD(NOW(), INTERVAL 1 DAY))"
             .formatted(tenantId, actorId, command, requestId);
+    }
+
+    private static String position(long tenantId, String code) {
+        return "INSERT INTO oa_position (tenant_id, code, name, status, sort, create_user, create_time, deleted) VALUES (%d, '%s', '测试岗位', 'ENABLED', 0, 1, NOW(), 0)"
+            .formatted(tenantId, code);
+    }
+
+    private static String employee(long tenantId, long userId) {
+        return "INSERT INTO oa_employee (tenant_id, user_id, employee_no, employment_status, dept_leader, create_user, create_time, deleted) VALUES (%d, %d, 'E%d', 'ACTIVE', 0, 1, NOW(), 0)"
+            .formatted(tenantId, userId, userId);
+    }
+
+    private static String employeePosition(long tenantId, long userId, long positionId) {
+        return "INSERT INTO oa_employee_position (tenant_id, user_id, position_id, create_user, create_time, deleted) VALUES (%d, %d, %d, 1, NOW(), 0)"
+            .formatted(tenantId, userId, positionId);
     }
 
     private static String url() {

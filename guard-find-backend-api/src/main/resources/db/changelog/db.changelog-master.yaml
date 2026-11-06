@@ -63,3 +63,6 @@ databaseChangeLog:
       file: classpath:db/changelog/mysql/oa/oa_outbox.sql
   - include:
       file: classpath:db/changelog/mysql/oa/oa_request_dedup.sql
+  # OA 员工组织与审批人候选解析
+  - include:
+      file: classpath:db/changelog/mysql/oa/oa_staff.sql
