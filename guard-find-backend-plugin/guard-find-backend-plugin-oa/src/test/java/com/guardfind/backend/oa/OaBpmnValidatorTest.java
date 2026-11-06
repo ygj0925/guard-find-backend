@@ -90,6 +90,17 @@ class OaBpmnValidatorTest {
     }
 
     @Test
+    void rejectsConditionOnDefaultFlow() {
+        String model = document(SAFE_PROCESS)
+            .replace("<bpmn:exclusiveGateway id=\"gateway\">", "<bpmn:exclusiveGateway id=\"gateway\" default=\"flowLow\">");
+
+        OaBpmnValidationResult result = validate(model);
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.errors()).anyMatch(error -> error.contains("默认连线 flowLow 不能配置条件"));
+    }
+
+    @Test
     void acceptsBpmnJsDiagramInterchange() {
         String diagram = """
             <bpmndi:BPMNDiagram id="BPMNDiagram_1">

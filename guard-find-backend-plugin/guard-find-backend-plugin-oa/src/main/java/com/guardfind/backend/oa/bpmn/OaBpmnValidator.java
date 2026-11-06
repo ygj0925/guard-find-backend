@@ -328,6 +328,9 @@ public class OaBpmnValidator {
             Element flow = flows.get(defaultRef);
             if (flow == null || !id.equals(flow.getAttribute("sourceRef"))) {
                 addError(errors, "排他网关 " + id + " 的默认连线无效");
+            } else if (childElements(flow).stream()
+                .anyMatch(child -> isBpmn(child) && "conditionExpression".equals(localName(child)))) {
+                addError(errors, "排他网关 " + id + " 的默认连线 " + defaultRef + " 不能配置条件");
             }
         }
         if (outgoing.size() > 1) {
