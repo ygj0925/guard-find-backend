@@ -113,11 +113,7 @@ class OaProcessModelServiceTest {
     void publishesWithFormBindingAndActivatesRelease() {
         runner().run(context -> {
             Fixture fixture = fixture(context);
-            fixture.jdbc.update("""
-                INSERT INTO oa_form_version (id, tenant_id, form_id, version, schema_json, schema_digest,
-                                             field_count, published_by, publish_time)
-                VALUES (9001, 101, 9000, 3, '{}', REPEAT('a', 64), 0, 7, CURRENT_TIMESTAMP)
-                """);
+            insertFormVersion(fixture.jdbc);
             OaProcessModelResp created = fixture.service
                 .create(101, 7, new OaProcessModelCreateReq("leave", "请假", null, null, BPMN));
 
@@ -154,19 +150,38 @@ class OaProcessModelServiceTest {
     }
 
     @Test
-    void republishDoesNotMigrateRunningInstance() {
+    void rejectsPublishWithoutFormVersion() {
         runner().run(context -> {
             Fixture fixture = fixture(context);
             OaProcessModelResp created = fixture.service
                 .create(101, 7, new OaProcessModelCreateReq("leave", "请假", null, null, BPMN));
-            OaProcessPublishResp v1 = fixture.service.publish(101, 7, created
+
+            OaProcessPublishResp result = fixture.service.publish(101, 7, created
                 .id(), new OaProcessPublishReq(null, null, null));
+
+            assertThat(result.valid()).isFalse();
+            assertThat(result.errors()).containsExactly("发布必须绑定表单版本");
+            assertThat(fixture.service.releases(101, created.id())).isEmpty();
+            assertThat(fixture.service.detail(101, created.id()).status()).isEqualTo("DRAFT");
+            assertThat(fixture.repositoryService.createDeploymentQuery().deploymentTenantId("101").count()).isZero();
+        });
+    }
+
+    @Test
+    void republishDoesNotMigrateRunningInstance() {
+        runner().run(context -> {
+            Fixture fixture = fixture(context);
+            insertFormVersion(fixture.jdbc);
+            OaProcessModelResp created = fixture.service
+                .create(101, 7, new OaProcessModelCreateReq("leave", "请假", null, null, BPMN));
+            OaProcessPublishResp v1 = fixture.service.publish(101, 7, created
+                .id(), new OaProcessPublishReq(9001L, null, null));
             ProcessInstance running = fixture.runtimeService
                 .startProcessInstanceByKeyAndTenantId("oaPublish", "biz-1", Map.of("approver", "7"), "101");
 
             fixture.service.update(101, 7, created.id(), new OaProcessModelUpdateReq("请假流程", null, null, BPMN, 1));
             OaProcessPublishResp v2 = fixture.service.publish(101, 7, created
-                .id(), new OaProcessPublishReq(null, null, "第二版"));
+                .id(), new OaProcessPublishReq(9001L, null, "第二版"));
 
             assertThat(v2.releaseVersion()).isEqualTo(2);
             assertThat(v2.processDefinitionVersion()).isEqualTo(2);
@@ -198,11 +213,12 @@ class OaProcessModelServiceTest {
     void rejectsInvalidXmlWithoutDeploymentOrRelease() {
         runner().run(context -> {
             Fixture fixture = fixture(context);
+            insertFormVersion(fixture.jdbc);
             OaProcessModelResp created = fixture.service
                 .create(101, 7, new OaProcessModelCreateReq("broken", "坏流程", null, null, INVALID_BPMN));
 
             OaProcessPublishResp result = fixture.service.publish(101, 7, created
-                .id(), new OaProcessPublishReq(null, null, null));
+                .id(), new OaProcessPublishReq(9001L, null, null));
 
             assertThat(result.valid()).isFalse();
             assertThat(result.errors()).isNotEmpty();
@@ -216,16 +232,17 @@ class OaProcessModelServiceTest {
     void disablesAndRepublishesWhileRejectingSharedProcessKey() {
         runner().run(context -> {
             Fixture fixture = fixture(context);
+            insertFormVersion(fixture.jdbc);
             OaProcessModelResp created = fixture.service
                 .create(101, 7, new OaProcessModelCreateReq("leave", "请假", null, null, BPMN));
-            fixture.service.publish(101, 7, created.id(), new OaProcessPublishReq(null, null, null));
+            fixture.service.publish(101, 7, created.id(), new OaProcessPublishReq(9001L, null, null));
 
             OaProcessModelResp disabled = fixture.service.disable(101, 7, created.id());
             assertThat(disabled.status()).isEqualTo("DISABLED");
             assertThat(fixture.service.releases(101, created.id())).extracting("status").containsExactly("STOPPED");
 
             OaProcessPublishResp again = fixture.service.publish(101, 7, created
-                .id(), new OaProcessPublishReq(null, null, "重新启用"));
+                .id(), new OaProcessPublishReq(9001L, null, "重新启用"));
             assertThat(again.valid()).isTrue();
             assertThat(again.releaseVersion()).isEqualTo(2);
             assertThat(fixture.service.detail(101, created.id()).status()).isEqualTo("PUBLISHED");
@@ -233,7 +250,7 @@ class OaProcessModelServiceTest {
             OaProcessModelResp other = fixture.service
                 .create(101, 7, new OaProcessModelCreateReq("leave-other", "另一个请假", null, null, BPMN));
             OaProcessPublishResp conflict = fixture.service.publish(101, 7, other
-                .id(), new OaProcessPublishReq(null, null, null));
+                .id(), new OaProcessPublishReq(9001L, null, null));
             assertThat(conflict.valid()).isFalse();
             assertThat(conflict.errors()).anyMatch(error -> error.contains("已被其他模型占用"));
         });
@@ -248,6 +265,14 @@ class OaProcessModelServiceTest {
             .getBean(RepositoryService.class), context.getBean(PlatformTransactionManager.class));
         return new Fixture(service, repository, jdbc, context.getBean(RuntimeService.class), context
             .getBean(TaskService.class), context.getBean(RepositoryService.class));
+    }
+
+    private static void insertFormVersion(JdbcTemplate jdbc) {
+        jdbc.update("""
+            INSERT INTO oa_form_version (id, tenant_id, form_id, version, schema_json, schema_digest,
+                                         field_count, published_by, publish_time)
+            VALUES (9001, 101, 9000, 3, '{}', REPEAT('a', 64), 0, 7, CURRENT_TIMESTAMP)
+            """);
     }
 
     private static void createTables(JdbcTemplate jdbc) {

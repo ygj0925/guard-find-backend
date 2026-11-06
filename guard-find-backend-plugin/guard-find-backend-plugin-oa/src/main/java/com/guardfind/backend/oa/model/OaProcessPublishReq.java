@@ -19,7 +19,7 @@ package com.guardfind.backend.oa.model;
 import jakarta.validation.constraints.Size;
 
 /**
- * 发布请求。表单版本可选；指定时必须属于当前租户。
+ * 发布请求。表单版本必填，且必须属于当前租户。
  */
 public record OaProcessPublishReq(Long formVersionId,
                                   @Size(max = 2000, message = "可发起范围不能超过 2000 个字符") String launchScope,

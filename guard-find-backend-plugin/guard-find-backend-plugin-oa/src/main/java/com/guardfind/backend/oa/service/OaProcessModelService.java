@@ -129,6 +129,9 @@ public class OaProcessModelService {
         if (model.bpmnXml() == null || model.bpmnXml().isBlank()) {
             return OaProcessPublishResp.rejected(List.of("流程 XML 不能为空"));
         }
+        if (req == null || req.formVersionId() == null) {
+            return OaProcessPublishResp.rejected(List.of("发布必须绑定表单版本"));
+        }
         requireXmlSize(model.bpmnXml());
 
         OaBpmnValidationResult validation = validator.validate(model.bpmnXml().getBytes(StandardCharsets.UTF_8));
@@ -147,12 +150,9 @@ public class OaProcessModelService {
             return OaProcessPublishResp.rejected(List.of("流程定义 Key 已被其他模型占用: " + processKey));
         }
 
-        OaProcessModelRepository.FormVersion formVersion = null;
-        if (req != null && req.formVersionId() != null) {
-            formVersion = repository.formVersion(tenantId, req.formVersionId());
-            if (formVersion == null) {
-                return OaProcessPublishResp.rejected(List.of("绑定的表单版本不存在或不属于当前租户"));
-            }
+        OaProcessModelRepository.FormVersion formVersion = repository.formVersion(tenantId, req.formVersionId());
+        if (formVersion == null) {
+            return OaProcessPublishResp.rejected(List.of("绑定的表单版本不存在或不属于当前租户"));
         }
 
         int releaseVersion = repository.nextReleaseVersion(tenantId, id);
@@ -171,18 +171,12 @@ public class OaProcessModelService {
 
         LocalDateTime now = LocalDateTime.now();
         long releaseId = repository.insertRelease(tenantId, id, releaseVersion, model.bpmnXml(), validation
-            .digest(), definition.getId(), definition.getKey(), definition.getVersion(), formVersion == null
-                ? null
-                : formVersion.formId(), formVersion == null ? null : req.formVersionId(), formVersion == null
-                    ? null
-                    : formVersion.version(), req == null ? null : req.launchScope(), userId, now, req == null
-                        ? null
-                        : req.remark());
+            .digest(), definition.getId(), definition.getKey(), definition.getVersion(), formVersion.formId(), req
+                .formVersionId(), formVersion.version(), req.launchScope(), userId, now, req.remark());
         repository.stopActiveReleases(tenantId, id, releaseId);
         int rows = repository.updatePublished(tenantId, id, model.bpmnXml(), validation
-            .digest(), releaseId, releaseVersion, formVersion == null ? null : formVersion.formId(), formVersion == null
-                ? null
-                : req.formVersionId(), userId, now, model.version());
+            .digest(), releaseId, releaseVersion, formVersion.formId(), req.formVersionId(), userId, now, model
+                .version());
         if (rows == 0) {
             throw new BusinessException("模型已被其他人修改，请刷新后重试");
         }
