@@ -83,8 +83,8 @@ class SupportUnreadRegressionTest {
     @BeforeEach
     void setup() {
         MiniappUserContextHolder.clear();
-        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), "test"),
-            AdminMessageDO.class);
+        TableInfoHelper
+            .initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), "test"), AdminMessageDO.class);
     }
 
     @AfterEach
@@ -102,11 +102,9 @@ class SupportUnreadRegressionTest {
 
         verify(support).selectCount(queryCaptor.capture());
         var query = queryCaptor.getValue();
-        assertEquals("(user_id = #{ew.paramNameValuePairs.MPGENVAL1}"
-            + " AND sender_type = #{ew.paramNameValuePairs.MPGENVAL2}"
-            + " AND is_read = #{ew.paramNameValuePairs.MPGENVAL3})", query.getSqlSegment());
-        assertEquals(Map.of("MPGENVAL1", userId, "MPGENVAL2", "ADMIN", "MPGENVAL3", 0),
-            query.getParamNameValuePairs());
+        assertEquals("(user_id = #{ew.paramNameValuePairs.MPGENVAL1}" + " AND sender_type = #{ew.paramNameValuePairs.MPGENVAL2}" + " AND is_read = #{ew.paramNameValuePairs.MPGENVAL3})", query
+            .getSqlSegment());
+        assertEquals(Map.of("MPGENVAL1", userId, "MPGENVAL2", "ADMIN", "MPGENVAL3", 0), query.getParamNameValuePairs());
         // Only SELECT COUNT is permitted: no message-list reads, acknowledgements or other writes.
         verifyNoMoreInteractions(support);
         verifyNoInteractions(conversations, messages, users, notices, wsHandlerProvider);
@@ -127,8 +125,7 @@ class SupportUnreadRegressionTest {
         ImController controller = new ImController(imService);
         var method = ImController.class.getDeclaredMethod("supportUnread");
 
-        assertArrayEquals(new String[] {"/miniapp/im"}, ImController.class
-            .getAnnotation(RequestMapping.class).value());
+        assertArrayEquals(new String[] {"/miniapp/im"}, ImController.class.getAnnotation(RequestMapping.class).value());
         assertArrayEquals(new String[] {"/support/unread"}, method.getAnnotation(GetMapping.class).value());
         assertEquals(0, method.getParameterCount());
         assertEquals(long.class, method.getReturnType());

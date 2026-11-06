@@ -1,3 +1,19 @@
+/*
+ * Copyright (c) 2022-present Charles7c Authors. All Rights Reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.guardfind.backend.oa;
 
 import org.flowable.engine.HistoryService;
@@ -93,9 +109,8 @@ class FlowableEngineCompatibilityTest {
 
             taskService.complete(task.getId(), Map.of("approved", true));
 
-            assertThat(runtimeService.createProcessInstanceQuery()
-                .processInstanceId(instance.getId())
-                .count()).isZero();
+            assertThat(runtimeService.createProcessInstanceQuery().processInstanceId(instance.getId()).count())
+                .isZero();
             HistoricProcessInstance historic = historyService.createHistoricProcessInstanceQuery()
                 .processInstanceId(instance.getId())
                 .singleResult();
@@ -113,25 +128,20 @@ class FlowableEngineCompatibilityTest {
     void timerJobCanBeMovedAndExecutedWithoutAsyncExecutor() {
         ProcessEngine engine = buildEngine("jdbc:h2:mem:flowable-timer;DB_CLOSE_DELAY=-1");
         try {
-            engine.getRepositoryService().createDeployment()
-                .addString("timer.bpmn20.xml", TIMER_XML)
-                .deploy();
+            engine.getRepositoryService().createDeployment().addString("timer.bpmn20.xml", TIMER_XML).deploy();
             ProcessInstance instance = engine.getRuntimeService().startProcessInstanceByKey("oaTimer");
 
-            List<Job> timers = engine.getManagementService().createTimerJobQuery()
+            List<Job> timers = engine.getManagementService()
+                .createTimerJobQuery()
                 .processInstanceId(instance.getId())
                 .list();
             assertThat(timers).hasSize(1);
-            assertThat(engine.getTaskService().createTaskQuery()
-                .processInstanceId(instance.getId())
-                .count()).isZero();
+            assertThat(engine.getTaskService().createTaskQuery().processInstanceId(instance.getId()).count()).isZero();
 
             Job executable = engine.getManagementService().moveTimerToExecutableJob(timers.get(0).getId());
             engine.getManagementService().executeJob(executable.getId());
 
-            Task review = engine.getTaskService().createTaskQuery()
-                .processInstanceId(instance.getId())
-                .singleResult();
+            Task review = engine.getTaskService().createTaskQuery().processInstanceId(instance.getId()).singleResult();
             assertThat(review).isNotNull();
             assertThat(review.getTaskDefinitionKey()).isEqualTo("review");
         } finally {
@@ -141,21 +151,17 @@ class FlowableEngineCompatibilityTest {
 
     @Test
     void runtimeStateSurvivesEngineRestart(@TempDir Path tempDir) {
-        String jdbcUrl = "jdbc:h2:file:" + tempDir.toAbsolutePath().toString().replace('\\', '/')
-            + "/flowable;DB_CLOSE_ON_EXIT=FALSE";
+        String jdbcUrl = "jdbc:h2:file:" + tempDir.toAbsolutePath()
+            .toString()
+            .replace('\\', '/') + "/flowable;DB_CLOSE_ON_EXIT=FALSE";
         String instanceId;
         String taskId;
 
         ProcessEngine first = buildEngine(jdbcUrl);
         try {
-            first.getRepositoryService().createDeployment()
-                .addString("approval.bpmn20.xml", APPROVAL_XML)
-                .deploy();
+            first.getRepositoryService().createDeployment().addString("approval.bpmn20.xml", APPROVAL_XML).deploy();
             instanceId = first.getRuntimeService().startProcessInstanceByKey("oaCompat").getId();
-            taskId = first.getTaskService().createTaskQuery()
-                .processInstanceId(instanceId)
-                .singleResult()
-                .getId();
+            taskId = first.getTaskService().createTaskQuery().processInstanceId(instanceId).singleResult().getId();
         } finally {
             first.close();
         }
@@ -168,7 +174,8 @@ class FlowableEngineCompatibilityTest {
             assertThat(pending.getId()).isEqualTo(taskId);
 
             second.getTaskService().complete(taskId, Map.of("approved", false));
-            assertThat(second.getHistoryService().createHistoricProcessInstanceQuery()
+            assertThat(second.getHistoryService()
+                .createHistoricProcessInstanceQuery()
                 .processInstanceId(instanceId)
                 .singleResult()
                 .getEndTime()).isNotNull();
@@ -178,8 +185,7 @@ class FlowableEngineCompatibilityTest {
     }
 
     private static ProcessEngine buildEngine(String jdbcUrl) {
-        return new StandaloneProcessEngineConfiguration()
-            .setJdbcUrl(jdbcUrl)
+        return new StandaloneProcessEngineConfiguration().setJdbcUrl(jdbcUrl)
             .setJdbcDriver("org.h2.Driver")
             .setJdbcUsername("sa")
             .setJdbcPassword("")

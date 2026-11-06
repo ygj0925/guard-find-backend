@@ -205,7 +205,7 @@ class ImRegressionTest {
         var method = AdminImServiceImpl.class.getMethod("send", Long.class, String.class);
         var tx = method.getAnnotation(Transactional.class);
         assertNotNull(tx, "send 必须开启事务，否则 AfterCommit 退化为落库前立即推送");
-        assertArrayEquals(new Class<?>[]{Exception.class}, tx.rollbackFor());
+        assertArrayEquals(new Class<?>[] {Exception.class}, tx.rollbackFor());
     }
 
     @Test
@@ -215,7 +215,7 @@ class ImRegressionTest {
         user.setAccountStatus(1);
         when(users.selectById(9L)).thenReturn(user);
         doAnswer(invocation -> {
-            ((AdminMessageDO) invocation.getArgument(0)).setId(77L);
+            ((AdminMessageDO)invocation.getArgument(0)).setId(77L);
             return 1;
         }).when(support).insert(any(AdminMessageDO.class));
         var ws = mock(ImWebSocketHandler.class);
@@ -229,11 +229,9 @@ class ImRegressionTest {
             admin.send(9L, "  您好  ");
             // 事务未提交时只能落库，不能提前把消息推给用户
             verify(ws, never()).pushAdminMessage(anyLong(), anyLong(), anyString(), anyString());
-            TransactionSynchronizationManager.getSynchronizations()
-                .forEach(TransactionSynchronization::afterCommit);
+            TransactionSynchronizationManager.getSynchronizations().forEach(TransactionSynchronization::afterCommit);
             verify(ws).pushAdminMessage(9L, 77L, "您好", "官方客服");
-        }
-        finally {
+        } finally {
             TransactionSynchronizationManager.clearSynchronization();
         }
     }
@@ -257,8 +255,7 @@ class ImRegressionTest {
                 sync.afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK);
             });
             verify(ws, never()).pushAdminMessage(anyLong(), anyLong(), anyString(), anyString());
-        }
-        finally {
+        } finally {
             TransactionSynchronizationManager.clearSynchronization();
         }
     }
