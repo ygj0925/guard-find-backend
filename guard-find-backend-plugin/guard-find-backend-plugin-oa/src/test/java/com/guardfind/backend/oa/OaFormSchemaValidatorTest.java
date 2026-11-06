@@ -122,4 +122,45 @@ class OaFormSchemaValidatorTest {
         assertThat(first).isEqualTo(second);
         assertThat(validator.validate(schema.replace("姓名", "名称"), true).digest()).isNotEqualTo(first);
     }
+
+    @Test
+    void acceptsVisibleReadonlyAndHiddenFields() {
+        String schema = """
+            {"fields":[
+              {"id":"f1","key":"name","label":"姓名","type":"text","required":true},
+              {"id":"f2","key":"dept","label":"部门","type":"text","readonly":true},
+              {"id":"f3","key":"internal","label":"内部","type":"text","hidden":true}
+            ]}
+            """;
+        OaFormValidationResult result = validator.validate(schema, true);
+        assertThat(result.valid()).isTrue();
+        assertThat(result.fieldCount()).isEqualTo(3);
+    }
+
+    @Test
+    void rejectsRequiredFieldThatIsReadonlyOrHidden() {
+        String schema = """
+            {"fields":[
+              {"id":"f1","key":"dept","label":"部门","type":"text","required":true,"readonly":true},
+              {"id":"f2","key":"internal","label":"内部","type":"text","required":true,"hidden":true}
+            ]}
+            """;
+        OaFormValidationResult result = validator.validate(schema, true);
+        assertThat(result.valid()).isFalse();
+        assertThat(result.errors()).filteredOn(error -> error.contains("不能同时设为必填与只读/隐藏")).hasSize(2);
+    }
+
+    @Test
+    void rejectsPublishWhenAllFieldsAreHidden() {
+        String schema = """
+            {"fields":[
+              {"id":"f1","key":"internal","label":"内部","type":"text","hidden":true}
+            ]}
+            """;
+        OaFormValidationResult draft = validator.validate(schema, false);
+        assertThat(draft.valid()).isTrue();
+        OaFormValidationResult publish = validator.validate(schema, true);
+        assertThat(publish.valid()).isFalse();
+        assertThat(publish.errors()).contains("表单至少需要一个可见字段才能发布");
+    }
 }

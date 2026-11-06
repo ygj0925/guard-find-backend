@@ -75,3 +75,6 @@ databaseChangeLog:
   # OA 表单管理菜单与权限
   - include:
       file: classpath:db/changelog/mysql/oa/oa_form_menu.sql
+  # OA 表单填写页隐藏路由
+  - include:
+      file: classpath:db/changelog/mysql/oa/oa_form_fill_menu.sql

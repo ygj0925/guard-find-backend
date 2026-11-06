@@ -196,6 +196,32 @@ class OaFormServiceTest {
         });
     }
 
+    @Test
+    void readsPublishedVersionDetailForRenderingAndKeepsTenantIsolation() {
+        runner().run(context -> {
+            Fixture fixture = fixture(context);
+            OaFormResp created = fixture.service.create(101, 7, new OaFormCreateReq("leave_form", "请假单", null, SCHEMA));
+            OaFormPublishResp published = fixture.service.publish(101, 7, created.id());
+
+            var detail = fixture.service.versionDetail(101, published.versionId());
+            assertThat(detail.formId()).isEqualTo(created.id());
+            assertThat(detail.formKey()).isEqualTo("leave_form");
+            assertThat(detail.name()).isEqualTo("请假单");
+            assertThat(detail.status()).isEqualTo("PUBLISHED");
+            assertThat(detail.version()).isEqualTo(1);
+            assertThat(detail.schemaJson()).isEqualTo(SCHEMA);
+            assertThat(detail.schemaDigest()).isEqualTo(published.schemaDigest());
+            assertThat(detail.fieldCount()).isEqualTo(2);
+
+            assertThatThrownBy(() -> fixture.service.versionDetail(202, published.versionId()))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("表单版本不存在");
+            assertThatThrownBy(() -> fixture.service.versionDetail(101, published.versionId() + 999))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("表单版本不存在");
+        });
+    }
+
     private static Fixture fixture(ConfigurableApplicationContext context) {
         DataSource dataSource = context.getBean(DataSource.class);
         JdbcTemplate jdbc = new JdbcTemplate(dataSource);

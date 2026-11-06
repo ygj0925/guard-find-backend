@@ -17,6 +17,7 @@
 package com.guardfind.backend.oa.repository;
 
 import com.guardfind.backend.oa.model.OaFormResp;
+import com.guardfind.backend.oa.model.OaFormVersionDetailResp;
 import com.guardfind.backend.oa.model.OaFormVersionOptionResp;
 import com.guardfind.backend.oa.model.OaFormVersionResp;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -70,6 +71,20 @@ public class OaFormRepository {
                                                                                                  .getInt("version"), rs
                                                                                                      .getTimestamp("publish_time")
                                                                                                      .toLocalDateTime());
+
+    private static final RowMapper<OaFormVersionDetailResp> VERSION_DETAIL_MAPPER = (rs,
+                                                                                     rowNum) -> new OaFormVersionDetailResp(rs
+                                                                                         .getLong("id"), rs
+                                                                                             .getLong("form_id"), rs
+                                                                                                 .getString("form_key"), rs
+                                                                                                     .getString("name"), rs
+                                                                                                         .getString("status"), rs
+                                                                                                             .getInt("version"), rs
+                                                                                                                 .getString("schema_json"), rs
+                                                                                                                     .getString("schema_digest"), rs
+                                                                                                                         .getInt("field_count"), rs
+                                                                                                                             .getTimestamp("publish_time")
+                                                                                                                             .toLocalDateTime());
 
     private final JdbcTemplate jdbcTemplate;
 
@@ -228,6 +243,17 @@ public class OaFormRepository {
              WHERE tenant_id = ? AND form_id = ?
              ORDER BY version DESC
             """, VERSION_MAPPER, tenantId, formId);
+    }
+
+    public OaFormVersionDetailResp versionDetail(long tenantId, long versionId) {
+        List<OaFormVersionDetailResp> versions = jdbcTemplate.query("""
+            SELECT v.id, v.form_id, f.form_key, f.name, f.status, v.version, v.schema_json,
+                   v.schema_digest, v.field_count, v.publish_time
+              FROM oa_form_version v
+              JOIN oa_form f ON f.tenant_id = v.tenant_id AND f.id = v.form_id
+             WHERE v.tenant_id = ? AND v.id = ? AND f.deleted = 0
+            """, VERSION_DETAIL_MAPPER, tenantId, versionId);
+        return versions.isEmpty() ? null : versions.get(0);
     }
 
     public List<OaFormVersionOptionResp> versionOptions(long tenantId) {

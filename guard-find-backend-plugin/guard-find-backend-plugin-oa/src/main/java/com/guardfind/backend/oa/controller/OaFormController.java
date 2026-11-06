@@ -22,6 +22,7 @@ import com.guardfind.backend.oa.model.OaFormCreateReq;
 import com.guardfind.backend.oa.model.OaFormPublishResp;
 import com.guardfind.backend.oa.model.OaFormResp;
 import com.guardfind.backend.oa.model.OaFormUpdateReq;
+import com.guardfind.backend.oa.model.OaFormVersionDetailResp;
 import com.guardfind.backend.oa.model.OaFormVersionOptionResp;
 import com.guardfind.backend.oa.model.OaFormVersionResp;
 import com.guardfind.backend.oa.service.OaFormService;
@@ -121,6 +122,13 @@ public class OaFormController {
     @GetMapping("/version-options")
     public List<OaFormVersionOptionResp> versionOptions() {
         return service.versionOptions(tenantId());
+    }
+
+    @Operation(summary = "表单发布版本详情")
+    @SaCheckPermission("system:oa:form:list")
+    @GetMapping("/version/{versionId}")
+    public OaFormVersionDetailResp versionDetail(@PathVariable Long versionId) {
+        return service.versionDetail(tenantId(), versionId);
     }
 
     private static long tenantId() {

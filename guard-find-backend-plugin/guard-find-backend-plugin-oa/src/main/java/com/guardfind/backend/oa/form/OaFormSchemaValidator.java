@@ -89,21 +89,27 @@ public class OaFormSchemaValidator {
         List<String> errors = new ArrayList<>();
         Set<String> keys = new HashSet<>();
         Set<String> ids = new HashSet<>();
+        int visibleFields = 0;
         for (int index = 0; index < fields.size(); index++) {
-            validateField(fields.get(index), index, keys, ids, errors);
+            if (validateField(fields.get(index), index, keys, ids, errors)) {
+                visibleFields++;
+            }
             if (errors.size() >= MAX_ERRORS) {
                 errors.add("错误过多，仅保留前 " + MAX_ERRORS + " 条");
                 break;
             }
         }
+        if (requireFields && !fields.isEmpty() && visibleFields == 0) {
+            errors.add("表单至少需要一个可见字段才能发布");
+        }
         return new OaFormValidationResult(errors.isEmpty(), errors, fields.size(), digest);
     }
 
-    private void validateField(JsonNode field, int index, Set<String> keys, Set<String> ids, List<String> errors) {
+    private boolean validateField(JsonNode field, int index, Set<String> keys, Set<String> ids, List<String> errors) {
         String prefix = "第 " + (index + 1) + " 个字段";
         if (field == null || !field.isObject()) {
             errors.add(prefix + "必须是对象");
-            return;
+            return true;
         }
         String id = text(field, "id");
         if (!id.isBlank()) {
@@ -127,18 +133,33 @@ public class OaFormSchemaValidator {
         } else if (label.length() > 100) {
             errors.add(prefix + "的 label 不能超过 100 个字符");
         }
+        boolean required = flag(field, "required", prefix, errors);
+        boolean readonly = flag(field, "readonly", prefix, errors);
+        boolean hidden = flag(field, "hidden", prefix, errors);
+        if (required && (readonly || hidden)) {
+            errors.add(prefix + "不能同时设为必填与只读/隐藏");
+        }
         String type = text(field, "type");
         if (!FIELD_TYPES.contains(type)) {
             errors.add(prefix + "的类型不支持: " + (type.isBlank() ? "(空)" : type));
-            return;
-        }
-        JsonNode required = field.get("required");
-        if (required != null && !required.isBoolean()) {
-            errors.add(prefix + "的 required 必须是布尔值");
+            return !hidden;
         }
         if (OPTION_TYPES.contains(type)) {
             validateOptions(field.get("options"), prefix, errors);
         }
+        return !hidden;
+    }
+
+    private static boolean flag(JsonNode field, String name, String prefix, List<String> errors) {
+        JsonNode value = field.get(name);
+        if (value == null || value.isNull()) {
+            return false;
+        }
+        if (!value.isBoolean()) {
+            errors.add(prefix + "的 " + name + " 必须是布尔值");
+            return false;
+        }
+        return value.asBoolean();
     }
 
     private void validateOptions(JsonNode options, String prefix, List<String> errors) {

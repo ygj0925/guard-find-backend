@@ -22,6 +22,7 @@ import com.guardfind.backend.oa.model.OaFormPublishResp;
 import com.guardfind.backend.oa.model.OaFormResp;
 import com.guardfind.backend.oa.model.OaFormUpdateReq;
 import com.guardfind.backend.oa.model.OaFormValidationResult;
+import com.guardfind.backend.oa.model.OaFormVersionDetailResp;
 import com.guardfind.backend.oa.model.OaFormVersionOptionResp;
 import com.guardfind.backend.oa.model.OaFormVersionResp;
 import com.guardfind.backend.oa.repository.OaFormRepository;
@@ -84,6 +85,14 @@ public class OaFormService {
 
     public List<OaFormVersionOptionResp> versionOptions(long tenantId) {
         return repository.versionOptions(tenantId);
+    }
+
+    public OaFormVersionDetailResp versionDetail(long tenantId, long versionId) {
+        OaFormVersionDetailResp detail = repository.versionDetail(tenantId, versionId);
+        if (detail == null) {
+            throw new BusinessException("表单版本不存在");
+        }
+        return detail;
     }
 
     public OaFormResp create(long tenantId, long userId, OaFormCreateReq req) {
