@@ -22,6 +22,7 @@ import org.flowable.engine.runtime.ProcessInstance;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 发起流程前的审批人守卫：先解析再启动，任何候选为空或失效都在写引擎前失败。
@@ -47,6 +48,16 @@ public class OaProcessLauncher {
                                  long applicantId,
                                  Map<String, Object> variables,
                                  Map<String, OaAssigneeSpec> candidateVariables) {
+        return start(processDefinitionKey, tenantId, businessKey, applicantId, variables, candidateVariables, Set.of());
+    }
+
+    public ProcessInstance start(String processDefinitionKey,
+                                 long tenantId,
+                                 String businessKey,
+                                 long applicantId,
+                                 Map<String, Object> variables,
+                                 Map<String, OaAssigneeSpec> candidateVariables,
+                                 Set<String> singleAssigneeVariables) {
         Map<String, Object> processVariables = variables == null ? new HashMap<>() : new HashMap<>(variables);
         OaAssigneeContext context = new OaAssigneeContext(tenantId, applicantId, formData(processVariables));
         assigneeResolver.requireActiveApplicant(context);
@@ -61,6 +72,11 @@ public class OaProcessLauncher {
                 } catch (OaAssigneeUnavailableException e) {
                     throw new OaAssigneeUnavailableException("审批人变量 %s 解析失败: %s".formatted(variableName, e
                         .getMessage()), e);
+                }
+                if (singleAssigneeVariables != null && singleAssigneeVariables.contains(variableName) && candidates
+                    .size() != 1) {
+                    throw new OaAssigneeUnavailableException("审批人变量 %s 用于 assignee，只能解析出一名员工，实际 %d 名"
+                        .formatted(variableName, candidates.size()));
                 }
                 processVariables.put(variableName, String.join(",", candidates.stream().map(String::valueOf).toList()));
             });

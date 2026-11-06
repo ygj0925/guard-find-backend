@@ -316,6 +316,48 @@ class OaBpmnValidatorTest {
     }
 
     @Test
+    void classifiesAssigneeVariablesForLaunchBinding() {
+        String process = """
+            <bpmn:startEvent id="start">
+              <bpmn:outgoing>flow1</bpmn:outgoing>
+            </bpmn:startEvent>
+            <bpmn:userTask id="first" flowable:assignee="${approver}">
+              <bpmn:incoming>flow1</bpmn:incoming>
+              <bpmn:outgoing>flow2</bpmn:outgoing>
+            </bpmn:userTask>
+            <bpmn:userTask id="second" flowable:candidateUsers="${reviewers}">
+              <bpmn:incoming>flow2</bpmn:incoming>
+              <bpmn:outgoing>flow3</bpmn:outgoing>
+            </bpmn:userTask>
+            <bpmn:userTask id="third" flowable:candidateGroups="${groupVar}">
+              <bpmn:incoming>flow3</bpmn:incoming>
+              <bpmn:outgoing>flow4</bpmn:outgoing>
+            </bpmn:userTask>
+            <bpmn:userTask id="fourth" flowable:candidateUsers="employee:5">
+              <bpmn:incoming>flow4</bpmn:incoming>
+              <bpmn:outgoing>flow5</bpmn:outgoing>
+            </bpmn:userTask>
+            <bpmn:endEvent id="end">
+              <bpmn:incoming>flow5</bpmn:incoming>
+            </bpmn:endEvent>
+            <bpmn:sequenceFlow id="flow1" sourceRef="start" targetRef="first"/>
+            <bpmn:sequenceFlow id="flow2" sourceRef="first" targetRef="second"/>
+            <bpmn:sequenceFlow id="flow3" sourceRef="second" targetRef="third"/>
+            <bpmn:sequenceFlow id="flow4" sourceRef="third" targetRef="fourth"/>
+            <bpmn:sequenceFlow id="flow5" sourceRef="fourth" targetRef="end"/>
+            """;
+
+        OaBpmnValidationResult result = validate(document(process));
+
+        assertThat(result.errors()).isEmpty();
+        assertThat(result.valid()).isTrue();
+        assertThat(result.assigneeVariables()).containsExactly("approver", "reviewers");
+        assertThat(result.singleAssigneeVariables()).containsExactly("approver");
+        assertThat(result.staticAssignments()).containsExactly("candidateUsers=employee:5");
+        assertThat(result.groupVariables()).containsExactly("groupVar");
+    }
+
+    @Test
     void digestChangesWithContent() {
         String first = validate(document(SAFE_PROCESS)).digest();
         String second = validate(document(SAFE_PROCESS.replace("PT24H", "PT48H"))).digest();

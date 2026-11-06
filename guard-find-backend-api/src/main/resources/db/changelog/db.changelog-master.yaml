@@ -78,3 +78,6 @@ databaseChangeLog:
   # OA 表单填写页隐藏路由
   - include:
       file: classpath:db/changelog/mysql/oa/oa_form_fill_menu.sql
+  # OA 发起流程与我的申请菜单
+  - include:
+      file: classpath:db/changelog/mysql/oa/oa_launch_menu.sql

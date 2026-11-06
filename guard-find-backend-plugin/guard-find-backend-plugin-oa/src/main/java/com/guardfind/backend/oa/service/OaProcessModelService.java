@@ -18,6 +18,7 @@ package com.guardfind.backend.oa.service;
 
 import com.guardfind.backend.oa.bpmn.OaBpmnValidationResult;
 import com.guardfind.backend.oa.bpmn.OaBpmnValidator;
+import com.guardfind.backend.oa.launch.OaLaunchScope;
 import com.guardfind.backend.oa.model.OaProcessModelCreateReq;
 import com.guardfind.backend.oa.model.OaProcessModelResp;
 import com.guardfind.backend.oa.model.OaProcessModelUpdateReq;
@@ -137,6 +138,12 @@ public class OaProcessModelService {
         if (req == null || req.formVersionId() == null) {
             return OaProcessPublishResp.rejected(List.of("发布必须绑定表单版本"));
         }
+        String launchScope;
+        try {
+            launchScope = OaLaunchScope.parse(req.launchScope()).toJsonOrNull();
+        } catch (IllegalArgumentException e) {
+            return OaProcessPublishResp.rejected(List.of("可发起范围无效: " + e.getMessage()));
+        }
         requireXmlSize(model.bpmnXml());
 
         OaBpmnValidationResult validation = validator.validate(model.bpmnXml().getBytes(StandardCharsets.UTF_8));
@@ -182,7 +189,7 @@ public class OaProcessModelService {
         LocalDateTime now = LocalDateTime.now();
         long releaseId = repository.insertRelease(tenantId, id, releaseVersion, model.bpmnXml(), validation
             .digest(), definition.getId(), definition.getKey(), definition.getVersion(), formVersion.formId(), req
-                .formVersionId(), formVersion.version(), req.launchScope(), userId, now, req.remark());
+                .formVersionId(), formVersion.version(), launchScope, userId, now, req.remark());
         repository.stopActiveReleases(tenantId, id, releaseId);
         int rows = repository.updatePublished(tenantId, id, model.bpmnXml(), validation
             .digest(), releaseId, releaseVersion, formVersion.formId(), req.formVersionId(), userId, now, model

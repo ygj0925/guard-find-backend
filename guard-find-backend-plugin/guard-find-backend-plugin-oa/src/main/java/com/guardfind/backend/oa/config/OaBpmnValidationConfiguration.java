@@ -19,6 +19,7 @@ package com.guardfind.backend.oa.config;
 import com.guardfind.backend.oa.bpmn.OaBpmnValidator;
 import com.guardfind.backend.oa.bpmn.OaConditionRuleCompiler;
 import com.guardfind.backend.oa.form.OaFormSchemaValidator;
+import com.guardfind.backend.oa.form.OaFormValueValidator;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
@@ -53,5 +54,11 @@ public class OaBpmnValidationConfiguration {
     @ConditionalOnMissingBean
     public OaFormSchemaValidator oaFormSchemaValidator() {
         return new OaFormSchemaValidator();
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public OaFormValueValidator oaFormValueValidator() {
+        return new OaFormValueValidator();
     }
 }

@@ -139,6 +139,10 @@ public class OaBpmnValidator {
         List<String> errors = new ArrayList<>();
         List<Element> elements = new ArrayList<>();
         List<OaAssigneeSpec> assignees = new ArrayList<>();
+        Set<String> assigneeVariables = new LinkedHashSet<>();
+        Set<String> singleAssigneeVariables = new LinkedHashSet<>();
+        Set<String> staticAssignments = new LinkedHashSet<>();
+        Set<String> groupVariables = new LinkedHashSet<>();
         collect(root, 1, elements, errors);
 
         for (Element element : elements) {
@@ -195,7 +199,7 @@ public class OaBpmnValidator {
             if (!isBpmn(element)) {
                 continue;
             }
-            validateElement(element, nodes, flows, errors, assignees);
+            validateElement(element, nodes, flows, errors, assignees, assigneeVariables, singleAssigneeVariables, staticAssignments, groupVariables);
         }
 
         if (nodes.values().stream().noneMatch(node -> "startEvent".equals(localName(node)))) {
@@ -206,7 +210,9 @@ public class OaBpmnValidator {
         }
 
         String processKey = process == null ? null : blankToNull(process.getAttribute("id"));
-        return new OaBpmnValidationResult(errors.isEmpty(), errors, nodes.size(), digest, processKey, assignees);
+        return new OaBpmnValidationResult(errors.isEmpty(), errors, nodes.size(), digest, processKey, assignees, List
+            .copyOf(assigneeVariables), List.copyOf(singleAssigneeVariables), List.copyOf(staticAssignments), List
+                .copyOf(groupVariables));
     }
 
     private Element resolveProcess(Element definitions, List<String> errors) {
@@ -252,7 +258,11 @@ public class OaBpmnValidator {
                                  Map<String, Element> nodes,
                                  Map<String, Element> flows,
                                  List<String> errors,
-                                 List<OaAssigneeSpec> assignees) {
+                                 List<OaAssigneeSpec> assignees,
+                                 Set<String> assigneeVariables,
+                                 Set<String> singleAssigneeVariables,
+                                 Set<String> staticAssignments,
+                                 Set<String> groupVariables) {
         String local = localName(element);
         String id = element.getAttribute("id");
         switch (local) {
@@ -260,7 +270,7 @@ public class OaBpmnValidator {
             case "endEvent" -> validateBoundaryChildren(element, Set.of("incoming"), "结束事件 " + id, errors);
             case "userTask" -> {
                 validateTaskChildren(element, errors);
-                validateUserTask(element, id, errors, assignees);
+                validateUserTask(element, id, errors, assignees, assigneeVariables, singleAssigneeVariables, staticAssignments, groupVariables);
             }
             case "serviceTask" -> {
                 validateTaskChildren(element, errors);
@@ -286,7 +296,14 @@ public class OaBpmnValidator {
         }
     }
 
-    private void validateUserTask(Element element, String id, List<String> errors, List<OaAssigneeSpec> assignees) {
+    private void validateUserTask(Element element,
+                                  String id,
+                                  List<String> errors,
+                                  List<OaAssigneeSpec> assignees,
+                                  Set<String> assigneeVariables,
+                                  Set<String> singleAssigneeVariables,
+                                  Set<String> staticAssignments,
+                                  Set<String> groupVariables) {
         String assignee = flowableAttribute(element, "assignee");
         String candidateUsers = flowableAttribute(element, "candidateUsers");
         String candidateGroups = flowableAttribute(element, "candidateGroups");
@@ -297,19 +314,39 @@ public class OaBpmnValidator {
         validateAssignment("assignee", assignee, id, errors);
         validateAssignment("candidateUsers", candidateUsers, id, errors);
         validateAssignment("candidateGroups", candidateGroups, id, errors);
-        collectAssignments("assignee", assignee, id, assignees, errors);
-        collectAssignments("candidateUsers", candidateUsers, id, assignees, errors);
-        collectAssignments("candidateGroups", candidateGroups, id, assignees, errors);
+        collectAssignments("assignee", assignee, id, assignees, assigneeVariables, singleAssigneeVariables, staticAssignments, groupVariables, errors);
+        collectAssignments("candidateUsers", candidateUsers, id, assignees, assigneeVariables, singleAssigneeVariables, staticAssignments, groupVariables, errors);
+        collectAssignments("candidateGroups", candidateGroups, id, assignees, assigneeVariables, singleAssigneeVariables, staticAssignments, groupVariables, errors);
     }
 
     private void collectAssignments(String name,
                                     String value,
                                     String id,
                                     List<OaAssigneeSpec> assignees,
+                                    Set<String> assigneeVariables,
+                                    Set<String> singleAssigneeVariables,
+                                    Set<String> staticAssignments,
+                                    Set<String> groupVariables,
                                     List<String> errors) {
-        if (value.isBlank() || value.contains("${")) {
+        if (value.isBlank()) {
             return;
         }
+        if (value.contains("${")) {
+            if (!SIMPLE_EXPRESSION.matcher(value).matches()) {
+                return;
+            }
+            String variable = variableName(value);
+            if ("candidateGroups".equals(name)) {
+                groupVariables.add(variable);
+            } else {
+                assigneeVariables.add(variable);
+                if ("assignee".equals(name)) {
+                    singleAssigneeVariables.add(variable);
+                }
+            }
+            return;
+        }
+        staticAssignments.add(name + "=" + value);
         for (String token : value.split(",")) {
             try {
                 OaAssigneeSpecParser.parse(token).ifPresent(assignees::add);
@@ -317,6 +354,12 @@ public class OaBpmnValidator {
                 addError(errors, "用户任务 " + id + " 的 " + name + " 配置无效: " + e.getMessage());
             }
         }
+    }
+
+    private static String variableName(String expression) {
+        String inner = expression.substring(2, expression.length() - 1).trim();
+        int dot = inner.indexOf('.');
+        return dot < 0 ? inner : inner.substring(0, dot);
     }
 
     private void validateServiceTask(Element element, String id, List<String> errors) {

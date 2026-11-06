@@ -23,22 +23,33 @@ import java.util.List;
 /**
  * BPMN 校验结果。digest 为原始 XML 的 SHA-256，用于发布版本指纹。
  *
- * @param valid      是否通过
- * @param errors     错误列表，通过时为空
- * @param nodeCount  流程节点数
- * @param digest     原始 XML 的 SHA-256 十六进制摘要
- * @param processKey 流程定义 key，解析失败时可能为空
- * @param assignees  带静态来源前缀的审批人配置，发布时用于校验员工/岗位
+ * @param valid                   是否通过
+ * @param errors                  错误列表，通过时为空
+ * @param nodeCount               流程节点数
+ * @param digest                  原始 XML 的 SHA-256 十六进制摘要
+ * @param processKey              流程定义 key，解析失败时可能为空
+ * @param assignees               带静态来源前缀的审批人配置，发布时用于校验员工/岗位
+ * @param assigneeVariables       assignee/candidateUsers 中的 ${变量}，发起时逐项绑定
+ * @param singleAssigneeVariables 仅出现在 assignee 中的 ${变量}，解析结果必须唯一
+ * @param staticAssignments       非 ${变量} 的审批人字面值，发起首版不支持
+ * @param groupVariables          candidateGroups 中的 ${变量}，发起首版不解析为员工
  */
 public record OaBpmnValidationResult(boolean valid, List<String> errors, int nodeCount, String digest,
-                                     String processKey, List<OaAssigneeSpec> assignees) {
+                                     String processKey, List<OaAssigneeSpec> assignees, List<String> assigneeVariables,
+                                     List<String> singleAssigneeVariables, List<String> staticAssignments,
+                                     List<String> groupVariables) {
 
     public OaBpmnValidationResult {
         errors = errors == null ? List.of() : List.copyOf(errors);
         assignees = assignees == null ? List.of() : List.copyOf(assignees);
+        assigneeVariables = assigneeVariables == null ? List.of() : List.copyOf(assigneeVariables);
+        singleAssigneeVariables = singleAssigneeVariables == null ? List.of() : List.copyOf(singleAssigneeVariables);
+        staticAssignments = staticAssignments == null ? List.of() : List.copyOf(staticAssignments);
+        groupVariables = groupVariables == null ? List.of() : List.copyOf(groupVariables);
     }
 
     static OaBpmnValidationResult failure(String message, String digest) {
-        return new OaBpmnValidationResult(false, List.of(message), 0, digest, null, List.of());
+        return new OaBpmnValidationResult(false, List.of(message), 0, digest, null, List.of(), List.of(), List
+            .of(), List.of(), List.of());
     }
 }

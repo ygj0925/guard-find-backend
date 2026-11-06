@@ -274,6 +274,25 @@ class OaProcessModelServiceTest {
     }
 
     @Test
+    void rejectsInvalidLaunchScopeBeforeDeployment() {
+        runner().run(context -> {
+            Fixture fixture = fixture(context);
+            insertFormVersion(fixture.jdbc);
+            OaProcessModelResp created = fixture.service
+                .create(101, 7, new OaProcessModelCreateReq("leave", "请假", null, null, BPMN));
+
+            OaProcessPublishResp result = fixture.service.publish(101, 7, created
+                .id(), new OaProcessPublishReq(9001L, "{\"users\":[\"abc\"]}", null));
+
+            assertThat(result.valid()).isFalse();
+            assertThat(result.errors()).anyMatch(error -> error.contains("可发起范围无效"));
+            assertThat(fixture.repositoryService.createDeploymentQuery().deploymentTenantId("101").count()).isZero();
+            assertThat(fixture.service.releases(101, created.id())).isEmpty();
+            assertThat(fixture.service.detail(101, created.id()).status()).isEqualTo("DRAFT");
+        });
+    }
+
+    @Test
     void rejectsUnavailableStaticAssigneeBeforeDeployment() {
         runner().run(context -> {
             Fixture fixture = fixture(context);
