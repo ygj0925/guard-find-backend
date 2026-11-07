@@ -16,8 +16,12 @@
 
 package com.guardfind.backend.oa.config;
 
+import com.guardfind.backend.oa.engine.OaApprovalEngine;
+import com.guardfind.backend.oa.engine.OaEngineTemplate;
 import org.flowable.common.engine.impl.history.HistoryLevel;
+import org.flowable.engine.HistoryService;
 import org.flowable.engine.ProcessEngine;
+import org.flowable.engine.RepositoryService;
 import org.flowable.engine.RuntimeService;
 import org.flowable.engine.TaskService;
 import org.flowable.spring.SpringProcessEngineConfiguration;
@@ -28,7 +32,6 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import com.guardfind.backend.oa.engine.OaEngineTemplate;
 
 /**
  * OA 引擎接入：引擎表由 Liquibase 托管，流程引擎只参与 Spring 事务，不启用引擎自带身份与事件注册表。
@@ -52,6 +55,15 @@ public class OaFlowableConfiguration {
     @ConditionalOnMissingBean
     public OaEngineTemplate oaEngineTemplate(RuntimeService runtimeService, TaskService taskService) {
         return new OaEngineTemplate(runtimeService, taskService);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public OaApprovalEngine oaApprovalEngine(RuntimeService runtimeService,
+                                             TaskService taskService,
+                                             HistoryService historyService,
+                                             RepositoryService repositoryService) {
+        return new OaApprovalEngine(runtimeService, taskService, historyService, repositoryService);
     }
 
     /**

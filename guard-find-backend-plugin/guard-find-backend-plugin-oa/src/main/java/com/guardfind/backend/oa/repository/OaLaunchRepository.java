@@ -305,7 +305,18 @@ public class OaLaunchRepository {
     }
 
     public OaApplicationDetailResp applicationDetail(long tenantId, long applicantId, long applicationId) {
-        List<OaApplicationDetailResp> details = jdbcTemplate.query("""
+        return loadApplicationDetail(tenantId, applicantId, applicationId);
+    }
+
+    /**
+     * 审批人详情：不按发起人过滤，调用方必须先完成任务授权。
+     */
+    public OaApplicationDetailResp applicationDetailById(long tenantId, long applicationId) {
+        return loadApplicationDetail(tenantId, null, applicationId);
+    }
+
+    private OaApplicationDetailResp loadApplicationDetail(long tenantId, Long applicantId, long applicationId) {
+        StringBuilder sql = new StringBuilder("""
             SELECT a.id, a.business_type, a.business_key, a.title, a.status, a.applicant_id, a.applicant_name,
                    a.applicant_dept_id, a.applicant_dept_name, a.release_id, r.release_version,
                    a.form_version_id, a.form_version, f.name AS form_name, f.form_key,
@@ -316,17 +327,35 @@ public class OaLaunchRepository {
               LEFT JOIN oa_process_model m ON m.tenant_id = r.tenant_id AND m.id = r.model_id
               LEFT JOIN oa_form_version v ON v.tenant_id = a.tenant_id AND v.id = a.form_version_id
               LEFT JOIN oa_form f ON f.tenant_id = v.tenant_id AND f.id = v.form_id
-             WHERE a.tenant_id = ? AND a.applicant_id = ? AND a.id = ? AND a.deleted = 0
-            """, (rs, rowNum) -> new OaApplicationDetailResp(rs.getLong("id"), rs.getString("business_type"), rs
-            .getString("business_key"), rs.getString("title"), rs.getString("status"), rs.getLong("applicant_id"), rs
-                .getString("applicant_name"), nullableLong(rs, "applicant_dept_id"), rs
-                    .getString("applicant_dept_name"), rs
-                        .getLong("release_id"), nullableInt(rs, "release_version"), nullableLong(rs, "form_version_id"), nullableInt(rs, "form_version"), rs
-                            .getString("form_name"), rs.getString("form_key"), rs.getString("model_name"), rs
-                                .getString("model_key"), rs.getString("schema_json"), parseMap(rs
-                                    .getString("form_data")), rs
-                                        .getString("process_instance_id"), timestamp(rs, "submitted_time"), timestamp(rs, "finished_time"), timestamp(rs, "create_time"), List
-                                            .of()), tenantId, applicantId, applicationId);
+             WHERE a.tenant_id = ? AND a.id = ? AND a.deleted = 0
+            """);
+        List<Object> args = new ArrayList<>();
+        args.add(tenantId);
+        args.add(applicationId);
+        if (applicantId != null) {
+            sql.append(" AND a.applicant_id = ?");
+            args.add(applicantId);
+        }
+        List<OaApplicationDetailResp> details = jdbcTemplate.query(sql.toString(), (rs,
+                                                                                    rowNum) -> new OaApplicationDetailResp(rs
+                                                                                        .getLong("id"), rs
+                                                                                            .getString("business_type"), rs
+                                                                                                .getString("business_key"), rs
+                                                                                                    .getString("title"), rs
+                                                                                                        .getString("status"), rs
+                                                                                                            .getLong("applicant_id"), rs
+                                                                                                                .getString("applicant_name"), nullableLong(rs, "applicant_dept_id"), rs
+                                                                                                                    .getString("applicant_dept_name"), rs
+                                                                                                                        .getLong("release_id"), nullableInt(rs, "release_version"), nullableLong(rs, "form_version_id"), nullableInt(rs, "form_version"), rs
+                                                                                                                            .getString("form_name"), rs
+                                                                                                                                .getString("form_key"), rs
+                                                                                                                                    .getString("model_name"), rs
+                                                                                                                                        .getString("model_key"), rs
+                                                                                                                                            .getString("schema_json"), parseMap(rs
+                                                                                                                                                .getString("form_data")), rs
+                                                                                                                                                    .getString("process_instance_id"), timestamp(rs, "submitted_time"), timestamp(rs, "finished_time"), timestamp(rs, "create_time"), List
+                                                                                                                                                        .of()), args
+                                                                                                                                                            .toArray());
         if (details.isEmpty()) {
             return null;
         }

@@ -81,3 +81,6 @@ databaseChangeLog:
   # OA 发起流程与我的申请菜单
   - include:
       file: classpath:db/changelog/mysql/oa/oa_launch_menu.sql
+  # OA 审批中心菜单与动作权限
+  - include:
+      file: classpath:db/changelog/mysql/oa/oa_approval_menu.sql
