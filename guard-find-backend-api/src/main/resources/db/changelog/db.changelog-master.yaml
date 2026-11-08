@@ -87,3 +87,6 @@ databaseChangeLog:
   # OA 附件下载权限与上传权限授予
   - include:
       file: classpath:db/changelog/mysql/oa/oa_attachment_menu.sql
+  # OA 员工/岗位管理菜单、乐观锁版本
+  - include:
+      file: classpath:db/changelog/mysql/oa/oa_staff_manage.sql
