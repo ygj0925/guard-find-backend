@@ -22,6 +22,9 @@ import com.guardfind.backend.oa.business.OaBusinessHook;
 import com.guardfind.backend.oa.business.OaBusinessPreparation;
 import com.guardfind.backend.oa.model.OaLeavePreviewResp;
 import com.guardfind.backend.oa.model.OaLeaveTypeResp;
+import com.guardfind.backend.oa.repository.OaAttendanceRepository;
+import com.guardfind.backend.oa.repository.OaAttendanceRepository.LeaveSpan;
+import com.guardfind.backend.oa.repository.OaAttendanceRepository.RequestRow;
 import com.guardfind.backend.oa.repository.OaLeaveRepository;
 import com.guardfind.backend.oa.repository.OaLeaveRepository.Balance;
 import com.guardfind.backend.oa.repository.OaLeaveRepository.LeaveRequestRow;
@@ -65,10 +68,12 @@ public class OaLeaveHook implements OaBusinessHook {
     private static final Set<String> RELEASE_STATUSES = Set.of("REJECTED", "WITHDRAWN", "CANCELLED");
 
     private final OaLeaveRepository repository;
+    private final OaAttendanceRepository attendanceRepository;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    public OaLeaveHook(OaLeaveRepository repository) {
+    public OaLeaveHook(OaLeaveRepository repository, OaAttendanceRepository attendanceRepository) {
         this.repository = repository;
+        this.attendanceRepository = attendanceRepository;
     }
 
     @Override
@@ -107,6 +112,7 @@ public class OaLeaveHook implements OaBusinessHook {
         if (plan.balance() != null && plan.balance().available().compareTo(plan.days()) < 0) {
             throw new BusinessException(insufficient(plan));
         }
+        rejectOverlaps(tenantId, applicantId, plan);
         Map<String, Object> variables = new LinkedHashMap<>();
         variables.put(VAR_DAYS, plan.days().doubleValue());
         variables.put(VAR_TYPE_CODE, plan.type().code());
@@ -138,7 +144,16 @@ public class OaLeaveHook implements OaBusinessHook {
     @Override
     public void finished(long tenantId, long applicationId, String status, long operatorId, LocalDateTime now) {
         LeaveRequestRow request = repository.lockRequest(tenantId, applicationId);
-        if (request == null || request.balanceId() == null || !STATUS_OCCUPIED.equals(request.status())) {
+        if (request == null) {
+            return;
+        }
+        if (request.balanceId() == null) {
+            if (STATUS_RECORDED.equals(request.status()) && RELEASE_STATUSES.contains(status)) {
+                repository.transitionRequest(tenantId, request.id(), STATUS_RECORDED, STATUS_RELEASED, now);
+            }
+            return;
+        }
+        if (!STATUS_OCCUPIED.equals(request.status())) {
             return;
         }
         if ("APPROVED".equals(status)) {
@@ -180,6 +195,36 @@ public class OaLeaveHook implements OaBusinessHook {
         }
         repository.insertLedger(tenantId, request.balanceId(), request.applicationId(), action, request
             .days(), repository.balanceById(tenantId, request.balanceId()), operatorId, null, now);
+    }
+
+    /**
+     * 拒绝与本人有效请假（按半天时段）及未关闭的加班/外出时间重叠；先锁申请人账号行串行化同人提交。
+     */
+    private void rejectOverlaps(long tenantId, long applicantId, LeavePlan plan) {
+        attendanceRepository.lockApplicant(tenantId, applicantId);
+        long from = slot(plan.start(), plan.startHalf());
+        long to = slot(plan.end(), plan.endHalf());
+        for (LeaveSpan other : attendanceRepository.activeLeaves(tenantId, applicantId, plan.start(), plan.end())) {
+            if (from <= slot(other.endDate(), other.endHalf()) && slot(other.startDate(), other.startHalf()) <= to) {
+                throw new BusinessException("与已有请假（" + other.typeName() + " " + other.startDate() + " ~ " + other
+                    .endDate() + "）时间重叠");
+            }
+        }
+        LeaveSpan span = new LeaveSpan(applicantId, plan.start(), plan.startHalf(), plan.end(), plan.endHalf(), plan
+            .type()
+            .name());
+        List<RequestRow> requests = attendanceRepository.overlappingRequests(tenantId, applicantId, span
+            .startTime(), span.endTime());
+        if (!requests.isEmpty()) {
+            RequestRow other = requests.get(0);
+            throw new BusinessException("与已有" + (OaAttendanceRepository.KIND_OVERTIME.equals(other.kind())
+                ? "加班"
+                : "外出") + "申请（" + other.workDate() + "）时间重叠");
+        }
+    }
+
+    private static long slot(LocalDate date, String half) {
+        return date.toEpochDay() * 2 + (OaLeaveDayCalculator.PM.equals(half) ? 1 : 0);
     }
 
     private LeavePlan plan(long tenantId, long applicantId, Map<String, Object> formData, boolean lock) {

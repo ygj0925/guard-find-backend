@@ -22,7 +22,9 @@ import top.continew.starter.core.exception.BusinessException;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.format.DateTimeParseException;
+import java.time.temporal.ChronoUnit;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -146,6 +148,21 @@ public final class OaBusinessFields {
         }
         try {
             return LocalDate.parse(text.length() > 10 ? text.substring(0, 10) : text);
+        } catch (DateTimeParseException e) {
+            throw new BusinessException(label + "格式无效");
+        }
+    }
+
+    public static LocalDateTime dateTime(Object value, String label, boolean required) {
+        String text = text(value);
+        if (text == null) {
+            if (required) {
+                throw new BusinessException("请选择" + label);
+            }
+            return null;
+        }
+        try {
+            return LocalDateTime.parse(text.replace(' ', 'T')).truncatedTo(ChronoUnit.MINUTES);
         } catch (DateTimeParseException e) {
             throw new BusinessException(label + "格式无效");
         }

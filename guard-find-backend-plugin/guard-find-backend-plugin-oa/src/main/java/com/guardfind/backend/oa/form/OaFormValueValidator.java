@@ -21,6 +21,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -43,6 +45,9 @@ import java.util.regex.Pattern;
 public class OaFormValueValidator {
 
     private static final Pattern DATE = Pattern.compile("^\\d{4}-\\d{2}-\\d{2}$");
+    private static final Pattern DATE_TIME = Pattern
+        .compile("^\\d{4}-\\d{2}-\\d{2}[ T]\\d{2}:\\d{2}(:\\d{2}(\\.\\d{1,9})?)?$");
+    public static final DateTimeFormatter DATE_TIME_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
     private static final int MAX_TEXT = 500;
     private static final int MAX_TEXTAREA = 5000;
     private static final int MAX_ATTACHMENTS = 20;
@@ -101,6 +106,7 @@ public class OaFormValueValidator {
             case "textarea" -> text(raw, MAX_TEXTAREA, "不能超过 " + MAX_TEXTAREA + " 个字符");
             case "number" -> number(raw);
             case "date" -> date(raw);
+            case "datetime" -> dateTime(raw);
             case "radio" -> radio(raw, field);
             case "checkbox" -> checkbox(raw, field);
             case "person" -> person(raw);
@@ -205,6 +211,17 @@ public class OaFormValueValidator {
             return LocalDate.parse(text.toString()).toString();
         } catch (DateTimeParseException e) {
             throw new IllegalArgumentException("日期不是有效日期");
+        }
+    }
+
+    private static String dateTime(Object raw) {
+        if (!(raw instanceof CharSequence text) || !DATE_TIME.matcher(text.toString()).matches()) {
+            throw new IllegalArgumentException("时间格式必须是 YYYY-MM-DD HH:mm");
+        }
+        try {
+            return LocalDateTime.parse(text.toString().replace(' ', 'T')).format(DATE_TIME_FORMAT);
+        } catch (DateTimeParseException e) {
+            throw new IllegalArgumentException("时间不是有效时间");
         }
     }
 

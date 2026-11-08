@@ -52,7 +52,7 @@ public class OaFormSchemaValidator {
     public static final int DEFAULT_TABLE_ROWS = 50;
 
     public static final Set<String> FIELD_TYPES = Set
-        .of("text", "textarea", "number", "date", "radio", "checkbox", "attachment", "person", "table");
+        .of("text", "textarea", "number", "date", "datetime", "radio", "checkbox", "attachment", "person", "table");
 
     public static final Set<String> COLUMN_TYPES = Set.of("text", "textarea", "number", "date", "radio");
 

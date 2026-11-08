@@ -123,3 +123,8 @@ databaseChangeLog:
       file: classpath:db/changelog/mysql/oa/oa_travel.sql
   - include:
       file: classpath:db/changelog/mysql/oa/oa_travel_menu.sql
+  # OA 假勤：班次/排班/考勤记录与受控导入、补卡/加班/外出申请单、菜单
+  - include:
+      file: classpath:db/changelog/mysql/oa/oa_attendance.sql
+  - include:
+      file: classpath:db/changelog/mysql/oa/oa_attendance_menu.sql

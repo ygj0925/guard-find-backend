@@ -19,6 +19,7 @@ package com.guardfind.backend.oa;
 import com.guardfind.backend.oa.bpmn.OaBpmnValidator;
 import com.guardfind.backend.oa.business.OaBusinessHooks;
 import com.guardfind.backend.oa.leave.OaLeaveHook;
+import com.guardfind.backend.oa.repository.OaAttendanceRepository;
 import com.guardfind.backend.oa.repository.OaLeaveRepository;
 import com.guardfind.backend.oa.config.OaFlowableConfiguration;
 import com.guardfind.backend.oa.model.OaProcessModelCreateReq;
@@ -341,7 +342,7 @@ class OaProcessModelServiceTest {
         OaProcessModelRepository repository = new OaProcessModelRepository(jdbc);
         OaProcessModelService service = new OaProcessModelService(repository, new OaBpmnValidator(List
             .of()), new OaAssigneeResolver(new StubStaffDirectory()), new OaBusinessHooks(List
-                .of(new OaLeaveHook(new OaLeaveRepository(jdbc))), null), context
+                .of(new OaLeaveHook(new OaLeaveRepository(jdbc), new OaAttendanceRepository(jdbc))), null), context
                     .getBean(RepositoryService.class), context.getBean(PlatformTransactionManager.class));
         return new Fixture(service, repository, jdbc, context.getBean(RuntimeService.class), context
             .getBean(TaskService.class), context.getBean(RepositoryService.class));
