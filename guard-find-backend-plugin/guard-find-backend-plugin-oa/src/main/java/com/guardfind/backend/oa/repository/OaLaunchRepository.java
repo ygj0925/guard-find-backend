@@ -17,6 +17,7 @@
 package com.guardfind.backend.oa.repository;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.guardfind.backend.oa.model.OaApplicationDetailResp;
 import com.guardfind.backend.oa.model.OaApplicationResp;
@@ -111,7 +112,8 @@ public class OaLaunchRepository {
                                                                                      .getString("action"), nullableLong(rs, "operator_id"), rs
                                                                                          .getString("operator_name"), rs
                                                                                              .getString("task_id"), rs
-                                                                                                 .getString("reason"), timestamp(rs, "create_time"));
+                                                                                                 .getString("reason"), timestamp(rs, "create_time"), nullableLong(rs, "original_assignee_id"), null, targetUserId(rs
+                                                                                                     .getString("detail_json")), null);
 
     private final JdbcTemplate jdbcTemplate;
 
@@ -354,22 +356,138 @@ public class OaLaunchRepository {
                                                                                                                                             .getString("schema_json"), parseMap(rs
                                                                                                                                                 .getString("form_data")), rs
                                                                                                                                                     .getString("process_instance_id"), timestamp(rs, "submitted_time"), timestamp(rs, "finished_time"), timestamp(rs, "create_time"), List
-                                                                                                                                                        .of()), args
-                                                                                                                                                            .toArray());
+                                                                                                                                                        .of(), Map
+                                                                                                                                                            .of()), args
+                                                                                                                                                                .toArray());
         if (details.isEmpty()) {
             return null;
         }
-        OaApplicationDetailResp detail = details.get(0);
+        OaApplicationDetailResp row = details.get(0);
+        OaApplicationDetailResp detail = row.withFormLabels(personLabels(tenantId, row.schemaJson(), row.formData()));
         return detail.withTimeline(timeline(tenantId, applicationId));
     }
 
+    /**
+     * 人员字段存的是用户 ID；详情返回 key→姓名映射，避免页面直接暴露 ID。
+     */
+    private Map<String, String> personLabels(long tenantId, String schemaJson, Map<String, Object> formData) {
+        if (schemaJson == null || schemaJson.isBlank() || formData.isEmpty()) {
+            return Map.of();
+        }
+        JsonNode root;
+        try {
+            root = OBJECT_MAPPER.readTree(schemaJson);
+        } catch (Exception e) {
+            return Map.of();
+        }
+        Map<String, List<Long>> fieldIds = new LinkedHashMap<>();
+        Set<Long> allIds = new LinkedHashSet<>();
+        for (JsonNode field : root.path("fields")) {
+            if (!"person".equals(field.path("type").asText())) {
+                continue;
+            }
+            String key = field.path("key").asText("");
+            if (key.isEmpty()) {
+                continue;
+            }
+            List<Long> ids = personIds(formData.get(key));
+            if (!ids.isEmpty()) {
+                fieldIds.put(key, ids);
+                allIds.addAll(ids);
+            }
+        }
+        if (allIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<Long, String> names = employeeNames(tenantId, allIds);
+        Map<String, String> labels = new LinkedHashMap<>();
+        fieldIds.forEach((key, ids) -> {
+            String joined = ids.stream()
+                .map(names::get)
+                .filter(name -> name != null && !name.isBlank())
+                .collect(java.util.stream.Collectors.joining("、"));
+            if (!joined.isEmpty()) {
+                labels.put(key, joined);
+            }
+        });
+        return labels;
+    }
+
+    private static List<Long> personIds(Object value) {
+        List<?> items = value instanceof List<?> list ? list : List.of(value);
+        List<Long> ids = new ArrayList<>();
+        for (Object item : items) {
+            if (item instanceof Number number && number.longValue() > 0) {
+                ids.add(number.longValue());
+            } else if (item instanceof CharSequence text) {
+                try {
+                    long id = Long.parseLong(text.toString().trim());
+                    if (id > 0) {
+                        ids.add(id);
+                    }
+                } catch (NumberFormatException ignored) {
+                    // 非 ID 值不参与姓名解析
+                }
+            }
+        }
+        return ids;
+    }
+
+    private Map<Long, String> employeeNames(long tenantId, Set<Long> ids) {
+        String placeholders = String.join(",", ids.stream().map(id -> "?").toList());
+        List<Object> args = new ArrayList<>();
+        args.add(tenantId);
+        args.addAll(ids);
+        Map<Long, String> names = new LinkedHashMap<>();
+        jdbcTemplate.query("""
+            SELECT e.user_id, COALESCE(NULLIF(u.nickname, ''), u.username) AS employee_name
+              FROM oa_employee e
+              LEFT JOIN sys_user u
+                ON u.id = e.user_id AND u.deleted = 0
+             WHERE e.tenant_id = ? AND e.deleted = 0 AND e.user_id IN (%s)
+            """.formatted(placeholders), rs -> {
+            names.put(rs.getLong("user_id"), rs.getString("employee_name"));
+        }, args.toArray());
+        return names;
+    }
+
     public List<OaApplicationTimelineResp> timeline(long tenantId, long applicationId) {
-        return jdbcTemplate.query("""
-            SELECT action, operator_id, operator_name, task_id, reason, create_time
+        List<OaApplicationTimelineResp> rows = jdbcTemplate.query("""
+            SELECT action, operator_id, operator_name, task_id, reason, create_time, original_assignee_id, detail_json
               FROM oa_approval_audit
              WHERE tenant_id = ? AND application_id = ?
              ORDER BY create_time, id
             """, TIMELINE_MAPPER, tenantId, applicationId);
+        Set<Long> ids = new LinkedHashSet<>();
+        for (OaApplicationTimelineResp row : rows) {
+            if (row.originalAssigneeId() != null) {
+                ids.add(row.originalAssigneeId());
+            }
+            if (row.targetUserId() != null) {
+                ids.add(row.targetUserId());
+            }
+        }
+        if (ids.isEmpty()) {
+            return rows;
+        }
+        Map<Long, String> names = employeeNames(tenantId, ids);
+        return rows.stream().map(row -> row.withNames(names)).toList();
+    }
+
+    private static Long targetUserId(String detailJson) {
+        if (detailJson == null || detailJson.isBlank()) {
+            return null;
+        }
+        try {
+            JsonNode target = OBJECT_MAPPER.readTree(detailJson).path("targetUserId");
+            if (target.isMissingNode() || target.isNull()) {
+                return null;
+            }
+            long id = target.isNumber() ? target.asLong() : Long.parseLong(target.asText().trim());
+            return id > 0 ? id : null;
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private static void appendApplicationFilters(StringBuilder sql, List<Object> args, String keyword, String status) {

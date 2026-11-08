@@ -171,6 +171,22 @@ class OaStaffServiceTest {
     }
 
     @Test
+    void resignationHandsOverToSupervisorSetInSameSave() {
+        runner().run(context -> {
+            Fixture fixture = fixture(context);
+            fixture.service
+                .createEmployee(101, 7, new OaEmployeeCreateReq(1003L, null, null, "ACTIVE", false, null, null, null));
+            OaEmployeeResp leaver = fixture.service
+                .createEmployee(101, 7, new OaEmployeeCreateReq(1001L, null, null, "ACTIVE", false, null, null, null));
+
+            fixture.service.updateEmployee(101, 7, leaver
+                .id(), new OaEmployeeUpdateReq(null, 1003L, "RESIGNED", false, null, null, null, leaver.version()));
+
+            assertThat(fixture.handovers).containsExactly(new long[] {101, 1001, 1003});
+        });
+    }
+
+    @Test
     void positionCrudRejectsDuplicateCodeAndDisablesOptions() {
         runner().run(context -> {
             Fixture fixture = fixture(context);
@@ -232,13 +248,16 @@ class OaStaffServiceTest {
         createTables(jdbc);
         seedUsers(jdbc);
         OaStaffRepository repository = new OaStaffRepository(jdbc);
+        List<long[]> handovers = new java.util.ArrayList<>();
         OaStaffService service = new OaStaffService(repository, (tenantId,
                                                                  operatorId,
                                                                  fromUserId,
                                                                  targetUserId,
-                                                                 reason) -> 0, context
-                                                                     .getBean(PlatformTransactionManager.class));
-        return new Fixture(service, jdbc);
+                                                                 reason) -> {
+            handovers.add(new long[] {tenantId, fromUserId, targetUserId});
+            return 0;
+        }, context.getBean(PlatformTransactionManager.class));
+        return new Fixture(service, jdbc, handovers);
     }
 
     private static void seedUsers(JdbcTemplate jdbc) {
@@ -334,7 +353,7 @@ class OaStaffServiceTest {
             """);
     }
 
-    private record Fixture(OaStaffService service, JdbcTemplate jdbc) {
+    private record Fixture(OaStaffService service, JdbcTemplate jdbc, List<long[]> handovers) {
 
         long position(String code, String name) {
             return service.createPosition(101, 7, new OaPositionCreateReq(code, name, 0)).id();

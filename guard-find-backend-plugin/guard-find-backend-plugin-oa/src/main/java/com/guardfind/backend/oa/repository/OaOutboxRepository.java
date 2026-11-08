@@ -112,13 +112,17 @@ public class OaOutboxRepository {
 
     /**
      * 处理中超过阈值的事件视为 worker 中断，重新排队而不是永久卡住。
+     *
+     * <p>
+     * 重新排队写 NULL 而非 now：datetime 列会把小数秒四舍五入，写入 now 可能晚于紧随其后的查询时间而被漏掉。
+     * </p>
      */
     public int recoverStuck(LocalDateTime threshold, LocalDateTime now) {
         return jdbcTemplate.update("""
             UPDATE oa_outbox
-               SET status = 'FAILED', next_retry_time = ?, last_error = '处理超时，已重新排队', update_time = ?
+               SET status = 'FAILED', next_retry_time = NULL, last_error = '处理超时，已重新排队', update_time = ?
              WHERE status = 'PROCESSING' AND update_time < ?
-            """, now, now, threshold);
+            """, now, threshold);
     }
 
     public OaOutboxEventResp findById(long tenantId, long id) {
@@ -134,9 +138,9 @@ public class OaOutboxRepository {
     public boolean retry(long tenantId, long id, LocalDateTime now) {
         return jdbcTemplate.update("""
             UPDATE oa_outbox
-               SET status = 'PENDING', next_retry_time = ?, last_error = '运维手动重试', update_time = ?
+               SET status = 'PENDING', retry_count = 0, next_retry_time = NULL, last_error = '运维手动重试', update_time = ?
              WHERE tenant_id = ? AND id = ? AND status IN ('FAILED', 'PENDING')
-            """, now, now, tenantId, id) == 1;
+            """, now, tenantId, id) == 1;
     }
 
     public List<OaOutboxEventResp> page(long tenantId, String status, String keyword, int offset, int size) {

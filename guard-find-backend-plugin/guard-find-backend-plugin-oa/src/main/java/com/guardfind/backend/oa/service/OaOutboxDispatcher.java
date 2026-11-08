@@ -70,7 +70,7 @@ public class OaOutboxDispatcher {
             }
             try {
                 int delivered = notificationService.deliver(event);
-                repository.markSent(event.id(), delivered == 0 ? "无接收人，事件已归档" : null, now);
+                repository.markSent(event.id(), delivered == 0 ? "无新增通知（无接收人或已投递过），事件已归档" : null, now);
                 sent++;
             } catch (RuntimeException e) {
                 int nextRetryCount = event.retryCount() + 1;

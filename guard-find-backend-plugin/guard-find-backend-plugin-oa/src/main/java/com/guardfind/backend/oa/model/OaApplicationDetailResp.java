@@ -31,11 +31,12 @@ public record OaApplicationDetailResp(long id, String businessType, String busin
                                       String modelName, String modelKey, String schemaJson,
                                       Map<String, Object> formData, String processInstanceId,
                                       LocalDateTime submittedTime, LocalDateTime finishedTime, LocalDateTime createTime,
-                                      List<OaApplicationTimelineResp> timeline) {
+                                      List<OaApplicationTimelineResp> timeline, Map<String, String> formLabels) {
 
     public OaApplicationDetailResp {
         formData = normalizeFormData(formData);
         timeline = timeline == null ? List.of() : List.copyOf(timeline);
+        formLabels = formLabels == null ? Map.of() : Map.copyOf(formLabels);
     }
 
     /**
@@ -71,6 +72,10 @@ public record OaApplicationDetailResp(long id, String businessType, String busin
     }
 
     public OaApplicationDetailResp withTimeline(List<OaApplicationTimelineResp> timeline) {
-        return new OaApplicationDetailResp(id, businessType, businessKey, title, status, applicantId, applicantName, applicantDeptId, applicantDeptName, releaseId, releaseVersion, formVersionId, formVersion, formName, formKey, modelName, modelKey, schemaJson, formData, processInstanceId, submittedTime, finishedTime, createTime, timeline);
+        return new OaApplicationDetailResp(id, businessType, businessKey, title, status, applicantId, applicantName, applicantDeptId, applicantDeptName, releaseId, releaseVersion, formVersionId, formVersion, formName, formKey, modelName, modelKey, schemaJson, formData, processInstanceId, submittedTime, finishedTime, createTime, timeline, formLabels);
+    }
+
+    public OaApplicationDetailResp withFormLabels(Map<String, String> formLabels) {
+        return new OaApplicationDetailResp(id, businessType, businessKey, title, status, applicantId, applicantName, applicantDeptId, applicantDeptName, releaseId, releaseVersion, formVersionId, formVersion, formName, formKey, modelName, modelKey, schemaJson, formData, processInstanceId, submittedTime, finishedTime, createTime, timeline, formLabels);
     }
 }

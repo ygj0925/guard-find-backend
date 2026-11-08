@@ -133,7 +133,7 @@ public class OaStaffService {
             }
             repository.replacePositions(tenantId, employee.userId(), positionIds, operatorId, now);
             if ("RESIGNED".equals(employmentStatus) && !"RESIGNED".equals(employee.employmentStatus())) {
-                autoHandover(tenantId, operatorId, employee);
+                autoHandover(tenantId, operatorId, employee.userId(), req.supervisorId());
             }
             return detailEmployee(tenantId, id);
         });
@@ -159,13 +159,12 @@ public class OaStaffService {
         }
     }
 
-    private void autoHandover(long tenantId, long operatorId, OaEmployeeResp employee) {
-        Long supervisorId = employee.supervisorId();
-        if (supervisorId == null || supervisorId == employee.userId()) {
+    private void autoHandover(long tenantId, long operatorId, long userId, Long supervisorId) {
+        if (supervisorId == null || supervisorId == userId) {
             return;
         }
         try {
-            taskHandover.transferRunningTasks(tenantId, operatorId, employee.userId(), supervisorId, "员工离职自动转交直属主管");
+            taskHandover.transferRunningTasks(tenantId, operatorId, userId, supervisorId, "员工离职自动转交直属主管");
         } catch (IllegalArgumentException ignored) {
             // 主管也已离职等场景不阻塞离职办理，管理员可通过手工转交补做
         }

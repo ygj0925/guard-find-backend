@@ -162,9 +162,14 @@ class OaOpsNotificationTest {
                 .queryForObject("SELECT id FROM oa_outbox WHERE dedup_key = 'BROKEN:1'", Long.class);
             fixture.jdbc
                 .update("""
-                    UPDATE oa_outbox SET payload = ? WHERE id = ?
+                    UPDATE oa_outbox SET payload = ?, retry_count = 5 WHERE id = ?
                     """, "{\"applicationId\":" + applicationId + ",\"notificationType\":\"TODO\",\"title\":\"重试成功\",\"content\":\"已恢复\",\"recipients\":[102]}", brokenId);
             fixture.opsService.retryOutbox(TENANT, brokenId);
+            assertThat(fixture.jdbc
+                .queryForObject("SELECT next_retry_time FROM oa_outbox WHERE id = ?", java.sql.Timestamp.class, brokenId))
+                .isNull();
+            assertThat(fixture.jdbc
+                .queryForObject("SELECT retry_count FROM oa_outbox WHERE id = ?", Integer.class, brokenId)).isZero();
 
             OaOutboxDispatcher.DispatchResult retried = fixture.dispatcher.dispatchDue();
             assertThat(retried.sent()).isEqualTo(1);

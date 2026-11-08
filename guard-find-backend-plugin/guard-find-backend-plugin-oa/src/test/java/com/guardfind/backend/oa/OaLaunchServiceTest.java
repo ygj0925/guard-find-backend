@@ -157,6 +157,12 @@ class OaLaunchServiceTest {
             assertThat(applications).hasSize(1);
             var application = fixture.applicationService.detail(TENANT, 101, applications.get(0).id());
             assertThat(application.formData()).containsEntry("reason", "事假");
+            fixture.jdbc.update("""
+                INSERT INTO oa_employee (id, tenant_id, user_id, employment_status, deleted)
+                VALUES (1, 101, 102, 'ACTIVE', 0)
+                """);
+            var labeled = fixture.applicationService.detail(TENANT, 101, applications.get(0).id());
+            assertThat(labeled.formLabels()).containsEntry("approver", "Bob");
             assertThat(application.timeline()).hasSize(1);
             assertThat(application.timeline().get(0).action()).isEqualTo("SUBMIT");
             assertThat(application.timeline().get(0).operatorName()).isEqualTo("Alice");
@@ -413,6 +419,7 @@ class OaLaunchServiceTest {
     private static void createTables(JdbcTemplate jdbc) {
         jdbc.execute("CREATE TABLE sys_dept (id BIGINT PRIMARY KEY, tenant_id BIGINT NOT NULL, name VARCHAR(100) NOT NULL, deleted BIGINT NOT NULL DEFAULT 0)");
         jdbc.execute("CREATE TABLE sys_user (id BIGINT PRIMARY KEY, tenant_id BIGINT NOT NULL, username VARCHAR(64) NOT NULL, nickname VARCHAR(64), dept_id BIGINT, status INT NOT NULL, deleted BIGINT NOT NULL DEFAULT 0)");
+        jdbc.execute("CREATE TABLE oa_employee (id BIGINT PRIMARY KEY, tenant_id BIGINT NOT NULL, user_id BIGINT NOT NULL, employment_status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE', deleted BIGINT NOT NULL DEFAULT 0)");
         jdbc.execute("CREATE TABLE sys_role (id BIGINT PRIMARY KEY, tenant_id BIGINT NOT NULL, code VARCHAR(64) NOT NULL, deleted BIGINT NOT NULL DEFAULT 0)");
         jdbc.execute("CREATE TABLE sys_user_role (id BIGINT PRIMARY KEY, tenant_id BIGINT NOT NULL, user_id BIGINT NOT NULL, role_id BIGINT NOT NULL)");
         jdbc.execute("""

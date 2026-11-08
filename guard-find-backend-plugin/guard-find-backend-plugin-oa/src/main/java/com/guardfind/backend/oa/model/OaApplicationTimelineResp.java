@@ -17,10 +17,22 @@
 package com.guardfind.backend.oa.model;
 
 import java.time.LocalDateTime;
+import java.util.Map;
 
 /**
  * 申请审批轨迹，来自不可变 oa_approval_audit。
+ *
+ * <p>
+ * originalAssignee 为任务原处理人（代理时即委托人）；target 仅转交类动作有值。
+ * </p>
  */
 public record OaApplicationTimelineResp(String action, Long operatorId, String operatorName, String taskId,
-                                        String reason, LocalDateTime createTime) {
+                                        String reason, LocalDateTime createTime, Long originalAssigneeId,
+                                        String originalAssigneeName, Long targetUserId, String targetUserName) {
+
+    public OaApplicationTimelineResp withNames(Map<Long, String> names) {
+        return new OaApplicationTimelineResp(action, operatorId, operatorName, taskId, reason, createTime, originalAssigneeId, originalAssigneeId == null
+            ? null
+            : names.get(originalAssigneeId), targetUserId, targetUserId == null ? null : names.get(targetUserId));
+    }
 }

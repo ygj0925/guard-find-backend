@@ -19,13 +19,16 @@ package com.guardfind.backend.oa.staff;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.guardfind.backend.oa.engine.OaApprovalEngine;
 import com.guardfind.backend.oa.repository.OaApprovalRepository;
+import com.guardfind.backend.oa.repository.OaApprovalRepository.ApplicationBrief;
 import com.guardfind.backend.oa.repository.OaApprovalRepository.ApprovalApplication;
+import com.guardfind.backend.oa.service.OaOutboxService;
 import org.flowable.task.api.Task;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -40,15 +43,18 @@ public class OaTaskHandoverService implements OaTaskHandover {
     private final OaApprovalEngine engine;
     private final OaApprovalRepository approvalRepository;
     private final OaStaffDirectory staffDirectory;
+    private final OaOutboxService outboxService;
     private final ObjectMapper objectMapper;
 
     public OaTaskHandoverService(OaApprovalEngine engine,
                                  OaApprovalRepository approvalRepository,
                                  OaStaffDirectory staffDirectory,
+                                 OaOutboxService outboxService,
                                  ObjectMapper objectMapper) {
         this.engine = engine;
         this.approvalRepository = approvalRepository;
         this.staffDirectory = staffDirectory;
+        this.outboxService = outboxService;
         this.objectMapper = objectMapper;
     }
 
@@ -74,11 +80,18 @@ public class OaTaskHandoverService implements OaTaskHandover {
                 detail.put("fromUserId", fromUserId);
                 detail.put("targetUserId", targetUserId);
                 detail.put("taskName", task.getName());
+                String requestId = handoverRequestId(task);
                 approvalRepository.insertAudit(tenantId, application.id(), task.getProcessInstanceId(), task
                     .getId(), "TRANSFER", operatorId, operatorName, originalAssignee == null
                         ? fromUserId
-                        : parseLong(originalAssignee), reason, handoverRequestId(task), writeJson(detail), LocalDateTime
-                            .now());
+                        : parseLong(originalAssignee), reason, requestId, writeJson(detail), LocalDateTime.now());
+                ApplicationBrief brief = approvalRepository.applicationBrief(tenantId, application.id());
+                if (brief != null) {
+                    outboxService.recordNotification(tenantId, OaOutboxService.AGGREGATE_TASK, task
+                        .getId(), OaOutboxService.EVENT_TASK_ASSIGNED, "HANDOVER:" + task
+                            .getId() + ":" + requestId, brief.id(), task.getId(), "TRANSFERRED", "任务已转交", "「" + brief
+                                .title() + "」的审批任务已转交给您", List.of(targetUserId));
+                }
             }
             transferred++;
         }

@@ -9,7 +9,7 @@ INSERT INTO sys_menu (id,title,parent_id,type,path,name,component,icon,permissio
 VALUES (9660,'通知消息',9500,2,'/oa/notifications','OaNotifications','oa/notifications/index','notification',NULL,8,1,1,NOW(),b'0',b'0',b'0');
 
 INSERT INTO sys_menu (id,title,parent_id,type,permission,sort,status,create_user,create_time)
-VALUES (9604,'urge',9600,3,'system:oa:application:urge',2,1,1,NOW());
+VALUES (9605,'urge',9600,3,'system:oa:application:urge',2,1,1,NOW());
 INSERT INTO sys_menu (id,title,parent_id,type,permission,sort,status,create_user,create_time)
 VALUES (9651,'list',9650,3,'system:oa:ops:list',0,1,1,NOW());
 INSERT INTO sys_menu (id,title,parent_id,type,permission,sort,status,create_user,create_time)
@@ -34,3 +34,16 @@ SELECT DISTINCT tpm.package_id, new_menu.id
   JOIN sys_menu m ON m.id = tpm.menu_id AND m.deleted = 0 AND m.permission = 'system:user:list'
  CROSS JOIN (SELECT 9604 AS id UNION ALL SELECT 9650 UNION ALL SELECT 9651 UNION ALL SELECT 9652
              UNION ALL SELECT 9653 UNION ALL SELECT 9660 UNION ALL SELECT 9661 UNION ALL SELECT 9662) new_menu;
+
+--changeset guardfind:oa-ops-menu-2
+--comment: 修正催办菜单 9605 的角色与套餐授权（首版授权列表误写为 9604）
+
+INSERT IGNORE INTO sys_role_menu (role_id, menu_id, tenant_id)
+SELECT DISTINCT rm.role_id, 9605, rm.tenant_id
+  FROM sys_role_menu rm
+  JOIN sys_menu m ON m.id = rm.menu_id AND m.deleted = 0 AND m.permission = 'system:user:list';
+
+INSERT IGNORE INTO tenant_package_menu (package_id, menu_id)
+SELECT DISTINCT tpm.package_id, 9605
+  FROM tenant_package_menu tpm
+  JOIN sys_menu m ON m.id = tpm.menu_id AND m.deleted = 0 AND m.permission = 'system:user:list';

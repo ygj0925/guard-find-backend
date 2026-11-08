@@ -546,6 +546,9 @@ class OaApprovalServiceTest {
             assertThat(fixture.jdbc
                 .queryForObject("SELECT request_id FROM oa_approval_audit WHERE action = 'TRANSFER'", String.class))
                 .startsWith("HANDOVER-");
+            assertThat(fixture.jdbc
+                .queryForObject("SELECT COUNT(*) FROM oa_outbox WHERE event_type = 'TASK_ASSIGNED' AND dedup_key LIKE 'HANDOVER:%' AND payload LIKE '%TRANSFERRED%' AND payload LIKE '%103%'", Integer.class))
+                .isEqualTo(1);
             assertThatThrownBy(() -> fixture.handover.transferRunningTasks(TENANT, 7, 103, 999, null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("不是本租户在职员工");
@@ -689,7 +692,7 @@ class OaApprovalServiceTest {
         OaApprovalRepository approvalRepository = new OaApprovalRepository(jdbc);
         OaApprovalService approvalService = new OaApprovalService(approvalRepository, launchRepository, delegateRepository, directory, approvalEngine, outboxService, new ObjectMapper(), transactionManager);
         OaDelegateService delegateService = new OaDelegateService(delegateRepository, directory);
-        OaTaskHandover handover = new OaTaskHandoverService(approvalEngine, approvalRepository, directory, new ObjectMapper());
+        OaTaskHandover handover = new OaTaskHandoverService(approvalEngine, approvalRepository, directory, outboxService, new ObjectMapper());
         return new Fixture(jdbc, launchService, approvalService, delegateService, handover, runtimeService, taskService);
     }
 
@@ -727,6 +730,7 @@ class OaApprovalServiceTest {
         jdbc.execute("CREATE TABLE sys_dept (id BIGINT PRIMARY KEY, tenant_id BIGINT NOT NULL, name VARCHAR(100) NOT NULL, deleted BIGINT NOT NULL DEFAULT 0)");
         jdbc.execute("CREATE TABLE sys_role (id BIGINT PRIMARY KEY, tenant_id BIGINT NOT NULL, code VARCHAR(64) NOT NULL, deleted BIGINT NOT NULL DEFAULT 0)");
         jdbc.execute("CREATE TABLE sys_user_role (id BIGINT PRIMARY KEY, tenant_id BIGINT NOT NULL, user_id BIGINT NOT NULL, role_id BIGINT NOT NULL)");
+        jdbc.execute("CREATE TABLE oa_employee (id BIGINT PRIMARY KEY, tenant_id BIGINT NOT NULL, user_id BIGINT NOT NULL, employment_status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE', deleted BIGINT NOT NULL DEFAULT 0)");
         jdbc.execute("""
             CREATE TABLE oa_process_model (
               id BIGINT PRIMARY KEY, tenant_id BIGINT NOT NULL, model_key VARCHAR(64) NOT NULL,
