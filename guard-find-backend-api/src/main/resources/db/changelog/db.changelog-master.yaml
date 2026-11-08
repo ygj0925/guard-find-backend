@@ -59,6 +59,8 @@ databaseChangeLog:
       file: classpath:db/changelog/mysql/oa/oa_approval_audit.sql
   - include:
       file: classpath:db/changelog/mysql/oa/oa_cc_receipt.sql
+  - include:
+      file: classpath:db/changelog/mysql/oa/oa_application_draft.sql
   # OA 附件归属、outbox 与命令幂等
   - include:
       file: classpath:db/changelog/mysql/oa/oa_attachment.sql

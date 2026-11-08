@@ -34,6 +34,7 @@ import com.guardfind.backend.oa.model.OaTaskTransferReq;
 import com.guardfind.backend.oa.repository.OaApprovalRepository;
 import com.guardfind.backend.oa.repository.OaAttachmentRepository;
 import com.guardfind.backend.oa.repository.OaCcRepository;
+import com.guardfind.backend.oa.repository.OaDraftRepository;
 import com.guardfind.backend.oa.repository.OaDelegateRepository;
 import com.guardfind.backend.oa.repository.OaLaunchRepository;
 import com.guardfind.backend.oa.repository.OaOutboxRepository;
@@ -688,7 +689,7 @@ class OaApprovalServiceTest {
         OaAttachmentService attachmentService = new OaAttachmentService(new OaAttachmentRepository(jdbc), approvalEngine);
         OaOutboxService outboxService = new OaOutboxService(new OaOutboxRepository(jdbc), new ObjectMapper());
         OaLaunchService launchService = new OaLaunchService(launchRepository, new OaBpmnValidator(List
-            .of()), new OaFormValueValidator(), attachmentService, launcher, approvalEngine, outboxService, new OaCcService(new OaCcRepository(jdbc), launchRepository, outboxService), new ObjectMapper(), transactionManager);
+            .of()), new OaFormValueValidator(), attachmentService, launcher, approvalEngine, outboxService, new OaCcService(new OaCcRepository(jdbc), launchRepository, outboxService), new OaDraftRepository(jdbc), new ObjectMapper(), transactionManager);
         StubStaffDirectory directory = new StubStaffDirectory();
         OaDelegateRepository delegateRepository = new OaDelegateRepository(jdbc);
         OaApprovalRepository approvalRepository = new OaApprovalRepository(jdbc);

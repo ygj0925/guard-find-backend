@@ -18,6 +18,8 @@ databaseChangeLog:
   - include:
       file: db/changelog/mysql/oa/oa_cc_receipt.sql
   - include:
+      file: db/changelog/mysql/oa/oa_application_draft.sql
+  - include:
       file: db/changelog/mysql/oa/oa_attachment.sql
   - include:
       file: db/changelog/mysql/oa/oa_outbox.sql

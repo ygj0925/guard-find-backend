@@ -23,16 +23,19 @@ import com.guardfind.backend.oa.engine.OaApprovalEngine;
 import com.guardfind.backend.oa.engine.OaEngineTemplate;
 import com.guardfind.backend.oa.form.OaFormValueValidator;
 import com.guardfind.backend.oa.model.OaAssigneeBindingReq;
+import com.guardfind.backend.oa.model.OaDraftSaveReq;
 import com.guardfind.backend.oa.model.OaLaunchDetailResp;
 import com.guardfind.backend.oa.model.OaLaunchSubmitReq;
 import com.guardfind.backend.oa.model.OaLaunchSubmitResp;
 import com.guardfind.backend.oa.repository.OaAttachmentRepository;
 import com.guardfind.backend.oa.repository.OaCcRepository;
+import com.guardfind.backend.oa.repository.OaDraftRepository;
 import com.guardfind.backend.oa.repository.OaLaunchRepository;
 import com.guardfind.backend.oa.repository.OaOutboxRepository;
 import com.guardfind.backend.oa.service.OaApplicationService;
 import com.guardfind.backend.oa.service.OaAttachmentService;
 import com.guardfind.backend.oa.service.OaCcService;
+import com.guardfind.backend.oa.service.OaDraftService;
 import com.guardfind.backend.oa.service.OaLaunchService;
 import com.guardfind.backend.oa.service.OaOutboxService;
 import com.guardfind.backend.oa.staff.OaAssigneeResolver;
@@ -399,6 +402,113 @@ class OaLaunchServiceTest {
         });
     }
 
+    @Test
+    void draftSavesIncompleteFormAndIsConsumedOnlyBySuccessfulSubmit() {
+        runner().run(context -> {
+            Fixture fixture = fixture(context, BPMN);
+            OaDraftService drafts = fixture.draftService;
+            var created = drafts.create(TENANT, 101, new OaDraftSaveReq(10L, "  草稿标题  ", Map.of("approver", "102"), List
+                .of(new OaAssigneeBindingReq("approver", "FORM_FIELD", "approver")), List.of(103L, 103L), null));
+            assertThat(created.version()).isZero();
+
+            var page = drafts.page(TENANT, 101, null, 1, 10);
+            assertThat(page.total()).isEqualTo(1);
+            assertThat(page.items().get(0).launchable()).isTrue();
+            assertThat(page.items().get(0).modelName()).isEqualTo("请假流程");
+            assertThat(page.items().get(0).title()).isEqualTo("草稿标题");
+            var detail = drafts.detail(TENANT, 101, created.id());
+            assertThat(detail.formData()).containsEntry("approver", "102").doesNotContainKey("reason");
+            assertThat(detail.assignees()).extracting(OaAssigneeBindingReq::type).containsExactly("FORM_FIELD");
+            assertThat(detail.ccUserIds()).containsExactly("103");
+
+            var updated = drafts.update(TENANT, 101, created.id(), new OaDraftSaveReq(10L, null, Map
+                .of("approver", "102", "reason", "补全"), List.of(), List.of(), 0));
+            assertThat(updated.version()).isEqualTo(1);
+            assertThatThrownBy(() -> drafts.update(TENANT, 101, created.id(), new OaDraftSaveReq(10L, null, Map
+                .of(), List.of(), List.of(), 0))).isInstanceOf(BusinessException.class).hasMessageContaining("其他页面修改");
+            assertThatThrownBy(() -> drafts.detail(TENANT, 102, created.id())).isInstanceOf(BusinessException.class)
+                .hasMessageContaining("草稿不存在");
+            assertThatThrownBy(() -> drafts.detail(202, 101, created.id())).isInstanceOf(BusinessException.class)
+                .hasMessageContaining("草稿不存在");
+            assertThatThrownBy(() -> drafts.delete(TENANT, 102, created.id())).isInstanceOf(BusinessException.class);
+            assertThatThrownBy(() -> drafts.create(TENANT, 103, new OaDraftSaveReq(10L, null, Map.of(), List.of(), List
+                .of(), null))).isInstanceOf(BusinessException.class).hasMessageContaining("可发起范围");
+
+            OaLaunchSubmitReq invalid = new OaLaunchSubmitReq("req-draft-invalid", null, Map.of("approver", List
+                .of(102)), List.of(), null, created.id());
+            assertThatThrownBy(() -> fixture.launchService.submit(TENANT, 101, 10, invalid))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("表单校验失败");
+            assertThat(drafts.page(TENANT, 101, null, 1, 10).total()).isEqualTo(1);
+
+            OaLaunchSubmitReq req = new OaLaunchSubmitReq("req-draft", null, Map.of("reason", "补全", "approver", List
+                .of(102)), List.of(), null, created.id());
+            OaLaunchSubmitResp resp = fixture.launchService.submit(TENANT, 101, 10, req);
+            assertThat(resp.replayed()).isFalse();
+            assertThat(drafts.page(TENANT, 101, null, 1, 10).total()).isZero();
+            assertThat(fixture.jdbc
+                .queryForObject("SELECT deleted FROM oa_application_draft WHERE id = ?", Long.class, created.id()))
+                .isEqualTo(created.id());
+            assertThat(fixture.launchService.submit(TENANT, 101, 10, req).replayed()).isTrue();
+
+            assertThatThrownBy(() -> fixture.launchService
+                .submit(TENANT, 101, 10, new OaLaunchSubmitReq("req-draft-again", null, Map
+                    .of("reason", "再次", "approver", List.of(102)), List.of(), null, created.id())))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("草稿不存在或已提交");
+            assertThat(fixture.jdbc.queryForObject("SELECT COUNT(*) FROM oa_application", Integer.class)).isEqualTo(1);
+            assertThat(fixture.runtimeService.createProcessInstanceQuery().count()).isEqualTo(1);
+        });
+    }
+
+    @Test
+    void draftDeleteCapacityAndStoppedReleaseRules() {
+        runner().run(context -> {
+            Fixture fixture = fixture(context, BPMN);
+            OaDraftService drafts = fixture.draftService;
+            var draft = drafts.create(TENANT, 101, new OaDraftSaveReq(10L, null, Map.of(), null, null, null));
+            drafts.delete(TENANT, 101, draft.id());
+            assertThat(drafts.page(TENANT, 101, null, 1, 10).total()).isZero();
+            assertThatThrownBy(() -> drafts.delete(TENANT, 101, draft.id())).isInstanceOf(BusinessException.class)
+                .hasMessageContaining("草稿不存在");
+
+            assertThatThrownBy(() -> drafts.create(TENANT, 101, new OaDraftSaveReq(10L, null, Map.of("reason", "长"
+                .repeat(70_000)), null, null, null))).isInstanceOf(BusinessException.class)
+                .hasMessageContaining("草稿内容过大");
+
+            fixture.jdbc.update("""
+                INSERT INTO oa_application_draft (tenant_id, applicant_id, release_id, version, create_time, deleted)
+                VALUES (101, 101, 99, 0, CURRENT_TIMESTAMP, 0)
+                """);
+            Long foreignRelease = fixture.jdbc.queryForObject("SELECT MAX(id) FROM oa_application_draft", Long.class);
+            assertThatThrownBy(() -> fixture.launchService
+                .submit(TENANT, 101, 10, new OaLaunchSubmitReq("req-draft-other", null, Map
+                    .of("reason", "事假", "approver", List.of(102)), List.of(), null, foreignRelease)))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("草稿不存在或已提交");
+            assertThat(drafts.page(TENANT, 101, null, 1, 10).items().get(0).launchable()).isFalse();
+            assertThat(fixture.jdbc.queryForObject("SELECT COUNT(*) FROM oa_request_dedup", Integer.class)).isZero();
+
+            for (int i = 0; i < 49; i++) {
+                fixture.jdbc
+                    .update("""
+                        INSERT INTO oa_application_draft (tenant_id, applicant_id, release_id, version, create_time, deleted)
+                        VALUES (101, 101, 10, 0, CURRENT_TIMESTAMP, 0)
+                        """);
+            }
+            assertThatThrownBy(() -> drafts.create(TENANT, 101, new OaDraftSaveReq(10L, null, Map
+                .of(), null, null, null))).isInstanceOf(BusinessException.class).hasMessageContaining("最多保存 50 份");
+
+            Long active = fixture.jdbc
+                .queryForObject("SELECT MIN(id) FROM oa_application_draft WHERE release_id = 10 AND deleted = 0", Long.class);
+            fixture.jdbc.update("UPDATE oa_process_release SET status = 'STOPPED' WHERE id = 10");
+            assertThat(drafts.detail(TENANT, 101, active).launchable()).isFalse();
+            assertThatThrownBy(() -> drafts.update(TENANT, 101, active, new OaDraftSaveReq(10L, null, Map
+                .of(), null, null, 0))).isInstanceOf(BusinessException.class).hasMessageContaining("流程未发布或已停用");
+            drafts.delete(TENANT, 101, active);
+        });
+    }
+
     private static void seedEmployee(JdbcTemplate jdbc, long id, long userId, String status) {
         jdbc.update("INSERT INTO oa_employee (id, tenant_id, user_id, employment_status, deleted) VALUES (?, 101, ?, ?, 0)", id, userId, status);
     }
@@ -454,10 +564,11 @@ class OaLaunchServiceTest {
         OaOutboxService outboxService = new OaOutboxService(new OaOutboxRepository(jdbc), new ObjectMapper());
         OaCcService ccService = new OaCcService(new OaCcRepository(jdbc), repository, outboxService);
         OaLaunchService launchService = new OaLaunchService(repository, new OaBpmnValidator(List
-            .of()), new OaFormValueValidator(), attachmentService, launcher, approvalEngine, outboxService, ccService, new ObjectMapper(), context
+            .of()), new OaFormValueValidator(), attachmentService, launcher, approvalEngine, outboxService, ccService, new OaDraftRepository(jdbc), new ObjectMapper(), context
                 .getBean(PlatformTransactionManager.class));
+        OaDraftService draftService = new OaDraftService(new OaDraftRepository(jdbc), repository, launchService, new ObjectMapper());
         OaApplicationService applicationService = new OaApplicationService(repository);
-        return new Fixture(jdbc, launchService, applicationService, attachmentService, ccService, context
+        return new Fixture(jdbc, launchService, applicationService, attachmentService, ccService, draftService, context
             .getBean(RuntimeService.class), context.getBean(TaskService.class));
     }
 
@@ -499,6 +610,7 @@ class OaLaunchServiceTest {
     }
 
     private static void createTables(JdbcTemplate jdbc) {
+        jdbc.execute("CREATE TABLE oa_application_draft (id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY, tenant_id BIGINT NOT NULL, applicant_id BIGINT NOT NULL, release_id BIGINT NOT NULL, title VARCHAR(200), form_data CLOB, assignees_json CLOB, cc_user_ids_json VARCHAR(1000), version INT NOT NULL DEFAULT 0, create_time TIMESTAMP NOT NULL, update_time TIMESTAMP, deleted BIGINT NOT NULL DEFAULT 0)");
         jdbc.execute("CREATE TABLE oa_cc_receipt (id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY, tenant_id BIGINT NOT NULL, application_id BIGINT NOT NULL, process_instance_id VARCHAR(64), receiver_id BIGINT NOT NULL, receiver_name VARCHAR(64), source_task_id VARCHAR(64), status VARCHAR(20) NOT NULL DEFAULT 'UNREAD', read_time TIMESTAMP, create_time TIMESTAMP NOT NULL, CONSTRAINT uk_cc UNIQUE (tenant_id, application_id, receiver_id))");
         jdbc.execute("CREATE TABLE sys_dept (id BIGINT PRIMARY KEY, tenant_id BIGINT NOT NULL, name VARCHAR(100) NOT NULL, deleted BIGINT NOT NULL DEFAULT 0)");
         jdbc.execute("CREATE TABLE sys_user (id BIGINT PRIMARY KEY, tenant_id BIGINT NOT NULL, username VARCHAR(64) NOT NULL, nickname VARCHAR(64), dept_id BIGINT, status INT NOT NULL, deleted BIGINT NOT NULL DEFAULT 0)");
@@ -631,7 +743,7 @@ class OaLaunchServiceTest {
     }
 
     private record Fixture(JdbcTemplate jdbc, OaLaunchService launchService, OaApplicationService applicationService,
-                           OaAttachmentService attachmentService, OaCcService ccService, RuntimeService runtimeService,
-                           TaskService taskService) {
+                           OaAttachmentService attachmentService, OaCcService ccService, OaDraftService draftService,
+                           RuntimeService runtimeService, TaskService taskService) {
     }
 }

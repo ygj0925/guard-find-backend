@@ -25,18 +25,27 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 发起请求。requestId 由客户端生成，用于命令幂等与重试回放；ccUserIds 为可选抄送人。
+ * 发起请求。requestId 由客户端生成，用于命令幂等与重试回放；ccUserIds 为可选抄送人；
+ * draftId 非空时提交成功会在同一事务内消费该草稿。
  */
 public record OaLaunchSubmitReq(@NotBlank(message = "请求 ID 不能为空") @Size(max = 64, message = "请求 ID 不能超过 64 个字符") String requestId,
                                 @Size(max = 200, message = "标题不能超过 200 个字符") String title,
                                 @NotNull(message = "表单数据不能为空") Map<String, Object> formData,
                                 @NotNull(message = "审批人绑定不能为空") @Size(max = 50, message = "审批人变量不能超过 50 个") List<@Valid OaAssigneeBindingReq> assignees,
-                                @Size(max = 20, message = "抄送人不能超过 20 人") List<Long> ccUserIds) {
+                                @Size(max = 20, message = "抄送人不能超过 20 人") List<Long> ccUserIds, Long draftId) {
 
     public OaLaunchSubmitReq(String requestId,
                              String title,
                              Map<String, Object> formData,
                              List<OaAssigneeBindingReq> assignees) {
-        this(requestId, title, formData, assignees, null);
+        this(requestId, title, formData, assignees, null, null);
+    }
+
+    public OaLaunchSubmitReq(String requestId,
+                             String title,
+                             Map<String, Object> formData,
+                             List<OaAssigneeBindingReq> assignees,
+                             List<Long> ccUserIds) {
+        this(requestId, title, formData, assignees, ccUserIds, null);
     }
 }

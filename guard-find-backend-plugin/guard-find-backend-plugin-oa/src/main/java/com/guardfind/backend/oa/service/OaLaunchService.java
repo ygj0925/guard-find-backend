@@ -29,6 +29,7 @@ import com.guardfind.backend.oa.model.OaLaunchDetailResp;
 import com.guardfind.backend.oa.model.OaLaunchItemResp;
 import com.guardfind.backend.oa.model.OaLaunchSubmitReq;
 import com.guardfind.backend.oa.model.OaLaunchSubmitResp;
+import com.guardfind.backend.oa.repository.OaDraftRepository;
 import com.guardfind.backend.oa.repository.OaLaunchRepository;
 import com.guardfind.backend.oa.repository.OaLaunchRepository.ApplicantProfile;
 import com.guardfind.backend.oa.repository.OaLaunchRepository.DedupRecord;
@@ -80,6 +81,7 @@ public class OaLaunchService {
     private final OaApprovalEngine engine;
     private final OaOutboxService outboxService;
     private final OaCcService ccService;
+    private final OaDraftRepository draftRepository;
     private final ObjectMapper objectMapper;
     private final TransactionTemplate transactionTemplate;
 
@@ -91,6 +93,7 @@ public class OaLaunchService {
                            OaApprovalEngine engine,
                            OaOutboxService outboxService,
                            OaCcService ccService,
+                           OaDraftRepository draftRepository,
                            ObjectMapper objectMapper,
                            PlatformTransactionManager transactionManager) {
         this.repository = repository;
@@ -101,6 +104,7 @@ public class OaLaunchService {
         this.engine = engine;
         this.outboxService = outboxService;
         this.ccService = ccService;
+        this.draftRepository = draftRepository;
         this.objectMapper = objectMapper;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
@@ -112,7 +116,7 @@ public class OaLaunchService {
         }
         List<OaLaunchItemResp> allowed = repository.activeLaunches(tenantId, keyword, category)
             .stream()
-            .filter(item -> scopeAllows(item.launchScope(), profile))
+            .filter(item -> launchScopeAllows(item.launchScope(), profile))
             .toList();
         int safePage = Math.max(1, page);
         int safeSize = Math.min(100, Math.max(1, size));
@@ -135,6 +139,13 @@ public class OaLaunchService {
                 .processDefinitionKey(), release.formId(), release.formVersionId(), release.formVersion(), release
                     .formName(), release.formKey(), release.schemaJson(), release.schemaDigest(), release
                         .launchScope(), true, variables);
+    }
+
+    /**
+     * 草稿保存复用发起入口的申请人与可发起范围校验，不做表单必填校验。
+     */
+    public OaLaunchRelease launchableRelease(long tenantId, long userId, long releaseId) {
+        return requireLaunchable(tenantId, releaseId, requireApplicant(tenantId, userId));
     }
 
     public OaLaunchSubmitResp submit(long tenantId, long userId, long releaseId, OaLaunchSubmitReq req) {
@@ -164,6 +175,9 @@ public class OaLaunchService {
                                         OaLaunchSubmitReq req) {
         LocalDateTime now = LocalDateTime.now();
         repository.insertDedup(tenantId, userId, COMMAND_SUBMIT, requestId, now, now.plusHours(DEDUP_TTL_HOURS));
+        if (req.draftId() != null && draftRepository.softDelete(tenantId, userId, req.draftId(), releaseId, now) == 0) {
+            throw new BusinessException("草稿不存在或已提交，请刷新后重试");
+        }
 
         ApplicantProfile profile = requireApplicant(tenantId, userId);
         OaLaunchRelease release = requireLaunchable(tenantId, releaseId, profile);
@@ -262,7 +276,7 @@ public class OaLaunchService {
         return release;
     }
 
-    private boolean scopeAllows(String launchScope, ApplicantProfile profile) {
+    public static boolean launchScopeAllows(String launchScope, ApplicantProfile profile) {
         try {
             return OaLaunchScope.parse(launchScope).allows(profile.userId(), profile.deptId(), profile.roleCodes());
         } catch (IllegalArgumentException e) {

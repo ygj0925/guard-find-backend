@@ -31,6 +31,7 @@ import com.guardfind.backend.oa.model.OaUrgeResp;
 import com.guardfind.backend.oa.repository.OaApprovalRepository;
 import com.guardfind.backend.oa.repository.OaAttachmentRepository;
 import com.guardfind.backend.oa.repository.OaCcRepository;
+import com.guardfind.backend.oa.repository.OaDraftRepository;
 import com.guardfind.backend.oa.repository.OaLaunchRepository;
 import com.guardfind.backend.oa.repository.OaNotificationRepository;
 import com.guardfind.backend.oa.repository.OaOutboxRepository;
@@ -317,7 +318,7 @@ class OaOpsNotificationTest {
         OaProcessLauncher launcher = new OaProcessLauncher(new OaEngineTemplate(runtimeService, taskService), new OaAssigneeResolver(new StubStaffDirectory()));
         OaAttachmentService attachmentService = new OaAttachmentService(new OaAttachmentRepository(jdbc), engine);
         OaLaunchService launchService = new OaLaunchService(launchRepository, new OaBpmnValidator(List
-            .of()), new OaFormValueValidator(), attachmentService, launcher, engine, outboxService, new OaCcService(new OaCcRepository(jdbc), launchRepository, outboxService), objectMapper, transactionManager);
+            .of()), new OaFormValueValidator(), attachmentService, launcher, engine, outboxService, new OaCcService(new OaCcRepository(jdbc), launchRepository, outboxService), new OaDraftRepository(jdbc), objectMapper, transactionManager);
         OaApprovalRepository approvalRepository = new OaApprovalRepository(jdbc);
         OaUrgeService urgeService = new OaUrgeService(approvalRepository, launchRepository, outboxRepository, engine, outboxService, objectMapper, transactionManager, 10, 5);
         OaOverdueService overdueService = new OaOverdueService(approvalRepository, outboxRepository, engine, outboxService, 24, 200);

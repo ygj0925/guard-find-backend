@@ -217,6 +217,9 @@ class OaEngineLiquibaseMySqlTest {
             .contains("application_id", "receiver_id", "source_task_id", "status", "read_time");
         assertThat(indexes(connection, "oa_cc_receipt"))
             .contains("uk_tenant_application_receiver", "idx_tenant_receiver_status");
+        assertThat(columns(connection, "oa_application_draft"))
+            .contains("tenant_id", "applicant_id", "release_id", "title", "form_data", "assignees_json", "cc_user_ids_json", "version", "deleted");
+        assertThat(indexes(connection, "oa_application_draft")).contains("idx_tenant_applicant");
         assertThat(columns(connection, "oa_attachment_link"))
             .contains("tenant_id", "application_id", "business_type", "business_key", "file_id", "file_name", "file_size", "content_type", "category", "scan_status", "available", "create_user", "deleted");
         assertThat(indexes(connection, "oa_attachment_link"))
@@ -248,8 +251,9 @@ class OaEngineLiquibaseMySqlTest {
 
     private static void clearTestData(Connection connection) throws SQLException {
         for (String table : new String[] {"oa_employee_position", "oa_employee", "oa_position", "oa_request_dedup",
-            "oa_notification", "oa_outbox", "oa_attachment_link", "oa_cc_receipt", "oa_approval_audit",
-            "oa_application", "oa_process_release", "oa_form_version", "oa_form", "oa_process_model"}) {
+            "oa_notification", "oa_outbox", "oa_attachment_link", "oa_cc_receipt", "oa_application_draft",
+            "oa_approval_audit", "oa_application", "oa_process_release", "oa_form_version", "oa_form",
+            "oa_process_model"}) {
             execute(connection, "DELETE FROM " + table + " WHERE tenant_id IN (" + TEST_TENANT_A + "," + TEST_TENANT_B + ")");
         }
     }
