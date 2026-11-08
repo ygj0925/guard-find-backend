@@ -32,7 +32,8 @@ public record OaAssigneeContext(long tenantId, long applicantId, Map<String, Obj
     public static final String FORM_DATA_VARIABLE = "oaFormData";
 
     public OaAssigneeContext {
-        if (tenantId <= 0) {
+        // 平台默认租户 ID 为 0，单租户部署同样合法
+        if (tenantId < 0) {
             throw new IllegalArgumentException("租户不能为空");
         }
         if (applicantId <= 0) {

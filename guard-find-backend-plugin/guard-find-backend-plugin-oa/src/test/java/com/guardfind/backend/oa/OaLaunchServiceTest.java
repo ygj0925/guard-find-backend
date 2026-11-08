@@ -225,7 +225,7 @@ class OaLaunchServiceTest {
             var detail = fixture.applicationService.detail(TENANT, 101, resp.applicationId());
             var stored = (List<?>)detail.formData().get("proof");
             assertThat(stored).hasSize(1);
-            assertThat(((Map<?, ?>)stored.get(0)).get("fileId")).isEqualTo(501);
+            assertThat(((Map<?, ?>)stored.get(0)).get("fileId")).isEqualTo("501");
             assertThat(((Map<?, ?>)stored.get(0)).get("name")).isEqualTo("报告.pdf");
         });
     }

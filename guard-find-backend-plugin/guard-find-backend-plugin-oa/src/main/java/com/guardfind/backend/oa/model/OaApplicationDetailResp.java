@@ -17,6 +17,7 @@
 package com.guardfind.backend.oa.model;
 
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -33,8 +34,40 @@ public record OaApplicationDetailResp(long id, String businessType, String busin
                                       List<OaApplicationTimelineResp> timeline) {
 
     public OaApplicationDetailResp {
-        formData = formData == null ? Map.of() : Map.copyOf(formData);
+        formData = normalizeFormData(formData);
         timeline = timeline == null ? List.of() : List.copyOf(timeline);
+    }
+
+    /**
+     * 附件 fileId 是雪花 ID，超出 JS 安全整数范围；响应时统一转成字符串，
+     * 避免前端 JSON 解析丢精度后按错误 ID 下载。
+     */
+    private static Map<String, Object> normalizeFormData(Map<String, Object> formData) {
+        if (formData == null || formData.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, Object> values = new LinkedHashMap<>();
+        formData.forEach((key, value) -> values.put(key, normalizeValue(value)));
+        return Map.copyOf(values);
+    }
+
+    private static Object normalizeValue(Object value) {
+        if (value instanceof Map<?, ?> map) {
+            Map<String, Object> nested = new LinkedHashMap<>();
+            map.forEach((key, item) -> {
+                if (key instanceof String name) {
+                    Object normalized = "fileId".equals(name) && item instanceof Number number
+                        ? Long.toString(number.longValue())
+                        : normalizeValue(item);
+                    nested.put(name, normalized);
+                }
+            });
+            return Map.copyOf(nested);
+        }
+        if (value instanceof List<?> list) {
+            return list.stream().map(OaApplicationDetailResp::normalizeValue).toList();
+        }
+        return value;
     }
 
     public OaApplicationDetailResp withTimeline(List<OaApplicationTimelineResp> timeline) {
