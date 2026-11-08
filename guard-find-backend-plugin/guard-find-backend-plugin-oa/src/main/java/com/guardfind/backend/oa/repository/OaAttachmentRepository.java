@@ -145,6 +145,15 @@ public class OaAttachmentRepository {
         return count != null && count > 0;
     }
 
+    public boolean isCcReceiver(long tenantId, long applicationId, long userId) {
+        Integer count = jdbcTemplate.queryForObject("""
+            SELECT COUNT(*)
+              FROM oa_cc_receipt
+             WHERE tenant_id = ? AND application_id = ? AND receiver_id = ?
+            """, Integer.class, tenantId, applicationId, userId);
+        return count != null && count > 0;
+    }
+
     private static String placeholders(int count) {
         return String.join(",", java.util.Collections.nCopies(count, "?"));
     }

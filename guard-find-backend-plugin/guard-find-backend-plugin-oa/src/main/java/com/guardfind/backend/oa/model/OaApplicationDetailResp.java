@@ -31,12 +31,14 @@ public record OaApplicationDetailResp(long id, String businessType, String busin
                                       String modelName, String modelKey, String schemaJson,
                                       Map<String, Object> formData, String processInstanceId,
                                       LocalDateTime submittedTime, LocalDateTime finishedTime, LocalDateTime createTime,
-                                      List<OaApplicationTimelineResp> timeline, Map<String, String> formLabels) {
+                                      List<OaApplicationTimelineResp> timeline, Map<String, String> formLabels,
+                                      List<OaCcReceiverResp> ccReceivers) {
 
     public OaApplicationDetailResp {
         formData = normalizeFormData(formData);
         timeline = timeline == null ? List.of() : List.copyOf(timeline);
         formLabels = formLabels == null ? Map.of() : Map.copyOf(formLabels);
+        ccReceivers = ccReceivers == null ? List.of() : List.copyOf(ccReceivers);
     }
 
     /**
@@ -72,10 +74,14 @@ public record OaApplicationDetailResp(long id, String businessType, String busin
     }
 
     public OaApplicationDetailResp withTimeline(List<OaApplicationTimelineResp> timeline) {
-        return new OaApplicationDetailResp(id, businessType, businessKey, title, status, applicantId, applicantName, applicantDeptId, applicantDeptName, releaseId, releaseVersion, formVersionId, formVersion, formName, formKey, modelName, modelKey, schemaJson, formData, processInstanceId, submittedTime, finishedTime, createTime, timeline, formLabels);
+        return new OaApplicationDetailResp(id, businessType, businessKey, title, status, applicantId, applicantName, applicantDeptId, applicantDeptName, releaseId, releaseVersion, formVersionId, formVersion, formName, formKey, modelName, modelKey, schemaJson, formData, processInstanceId, submittedTime, finishedTime, createTime, timeline, formLabels, ccReceivers);
     }
 
     public OaApplicationDetailResp withFormLabels(Map<String, String> formLabels) {
-        return new OaApplicationDetailResp(id, businessType, businessKey, title, status, applicantId, applicantName, applicantDeptId, applicantDeptName, releaseId, releaseVersion, formVersionId, formVersion, formName, formKey, modelName, modelKey, schemaJson, formData, processInstanceId, submittedTime, finishedTime, createTime, timeline, formLabels);
+        return new OaApplicationDetailResp(id, businessType, businessKey, title, status, applicantId, applicantName, applicantDeptId, applicantDeptName, releaseId, releaseVersion, formVersionId, formVersion, formName, formKey, modelName, modelKey, schemaJson, formData, processInstanceId, submittedTime, finishedTime, createTime, timeline, formLabels, ccReceivers);
+    }
+
+    public OaApplicationDetailResp withCcReceivers(List<OaCcReceiverResp> ccReceivers) {
+        return new OaApplicationDetailResp(id, businessType, businessKey, title, status, applicantId, applicantName, applicantDeptId, applicantDeptName, releaseId, releaseVersion, formVersionId, formVersion, formName, formKey, modelName, modelKey, schemaJson, formData, processInstanceId, submittedTime, finishedTime, createTime, timeline, formLabels, ccReceivers);
     }
 }

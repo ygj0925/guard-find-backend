@@ -22,6 +22,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.guardfind.backend.oa.model.OaApplicationDetailResp;
 import com.guardfind.backend.oa.model.OaApplicationResp;
 import com.guardfind.backend.oa.model.OaApplicationTimelineResp;
+import com.guardfind.backend.oa.model.OaCcReceiverResp;
 import com.guardfind.backend.oa.model.OaLaunchItemResp;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
@@ -357,14 +358,26 @@ public class OaLaunchRepository {
                                                                                                                                                 .getString("form_data")), rs
                                                                                                                                                     .getString("process_instance_id"), timestamp(rs, "submitted_time"), timestamp(rs, "finished_time"), timestamp(rs, "create_time"), List
                                                                                                                                                         .of(), Map
-                                                                                                                                                            .of()), args
-                                                                                                                                                                .toArray());
+                                                                                                                                                            .of(), List
+                                                                                                                                                                .of()), args
+                                                                                                                                                                    .toArray());
         if (details.isEmpty()) {
             return null;
         }
         OaApplicationDetailResp row = details.get(0);
         OaApplicationDetailResp detail = row.withFormLabels(personLabels(tenantId, row.schemaJson(), row.formData()));
-        return detail.withTimeline(timeline(tenantId, applicationId));
+        return detail.withTimeline(timeline(tenantId, applicationId))
+            .withCcReceivers(ccReceivers(tenantId, applicationId));
+    }
+
+    public List<OaCcReceiverResp> ccReceivers(long tenantId, long applicationId) {
+        return jdbcTemplate.query("""
+            SELECT receiver_id, receiver_name, status, read_time
+              FROM oa_cc_receipt
+             WHERE tenant_id = ? AND application_id = ?
+             ORDER BY id
+            """, (rs, rowNum) -> new OaCcReceiverResp(rs.getLong("receiver_id"), rs.getString("receiver_name"), rs
+            .getString("status"), timestamp(rs, "read_time")), tenantId, applicationId);
     }
 
     /**

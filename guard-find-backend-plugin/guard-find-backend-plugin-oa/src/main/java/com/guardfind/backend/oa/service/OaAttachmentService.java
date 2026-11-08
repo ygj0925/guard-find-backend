@@ -134,7 +134,8 @@ public class OaAttachmentService {
         }
         boolean authorized = userId == link.applicantId() || repository.hasAuditRecord(tenantId, link
             .applicationId(), userId) || approvalEngine.hasTaskAccess(link.processInstanceId(), Long
-                .toString(tenantId), Long.toString(userId));
+                .toString(tenantId), Long.toString(userId)) || repository.isCcReceiver(tenantId, link
+                    .applicationId(), userId);
         if (!authorized) {
             throw new BusinessException(NOT_FOUND);
         }

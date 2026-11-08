@@ -100,3 +100,6 @@ databaseChangeLog:
       file: classpath:db/changelog/mysql/oa/oa_ops.sql
   - include:
       file: classpath:db/changelog/mysql/oa/oa_ops_menu.sql
+  # OA 抄送我的菜单与权限
+  - include:
+      file: classpath:db/changelog/mysql/oa/oa_cc_menu.sql

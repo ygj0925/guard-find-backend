@@ -79,6 +79,7 @@ public class OaLaunchService {
     private final OaProcessLauncher launcher;
     private final OaApprovalEngine engine;
     private final OaOutboxService outboxService;
+    private final OaCcService ccService;
     private final ObjectMapper objectMapper;
     private final TransactionTemplate transactionTemplate;
 
@@ -89,6 +90,7 @@ public class OaLaunchService {
                            OaProcessLauncher launcher,
                            OaApprovalEngine engine,
                            OaOutboxService outboxService,
+                           OaCcService ccService,
                            ObjectMapper objectMapper,
                            PlatformTransactionManager transactionManager) {
         this.repository = repository;
@@ -98,6 +100,7 @@ public class OaLaunchService {
         this.launcher = launcher;
         this.engine = engine;
         this.outboxService = outboxService;
+        this.ccService = ccService;
         this.objectMapper = objectMapper;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
@@ -179,6 +182,7 @@ public class OaLaunchService {
 
         Set<String> personFields = personFields(release.schemaJson());
         Map<String, OaAssigneeSpec> bindings = resolveBindings(validation, req.assignees(), personFields);
+        Map<Long, String> ccReceivers = ccService.resolveReceivers(tenantId, userId, req.ccUserIds());
 
         Map<String, Object> variables = new LinkedHashMap<>(normalized);
         variables.put(OaAssigneeContext.FORM_DATA_VARIABLE, Map.copyOf(normalized));
@@ -201,7 +205,7 @@ public class OaLaunchService {
         attachmentService.link(tenantId, applicationId, release.modelKey(), businessKey, userId, prepared
             .attachments(), now);
         repository.insertAudit(tenantId, applicationId, instance.getId(), "SUBMIT", userId, profile
-            .name(), requestId, auditDetail(requestId, release, bindings), now);
+            .name(), requestId, auditDetail(requestId, release, bindings, ccReceivers), now);
         List<Long> recipients = engine.activeTasks(instance.getId(), Long.toString(tenantId))
             .stream()
             .flatMap(task -> engine.recipientIds(task).stream())
@@ -210,6 +214,7 @@ public class OaLaunchService {
         outboxService.recordNotification(tenantId, OaOutboxService.AGGREGATE_APPLICATION, Long
             .toString(applicationId), OaOutboxService.EVENT_APPLICATION_SUBMITTED, "SUBMIT:" + requestId, applicationId, null, "TODO", "待审批：" + title, "「" + release
                 .modelName() + "」已提交，等待您审批", recipients);
+        ccService.record(tenantId, applicationId, instance.getId(), ccReceivers, requestId, profile.name(), title, now);
 
         OaLaunchSubmitResp resp = new OaLaunchSubmitResp(applicationId, businessKey, instance.getId(), false);
         repository.markDedupSucceeded(tenantId, userId, COMMAND_SUBMIT, requestId, writeJson(resp));
@@ -405,7 +410,10 @@ public class OaLaunchService {
             .toUpperCase(Locale.ROOT);
     }
 
-    private String auditDetail(String requestId, OaLaunchRelease release, Map<String, OaAssigneeSpec> bindings) {
+    private String auditDetail(String requestId,
+                               OaLaunchRelease release,
+                               Map<String, OaAssigneeSpec> bindings,
+                               Map<Long, String> ccReceivers) {
         List<Map<String, Object>> assignees = new ArrayList<>();
         bindings.forEach((name, spec) -> assignees.add(Map.of("variableName", name, "type", spec.type()
             .name(), "value", spec.value() == null ? "" : spec.value())));
@@ -415,6 +423,9 @@ public class OaLaunchService {
         detail.put("modelKey", release.modelKey());
         detail.put("formVersionId", release.formVersionId());
         detail.put("assignees", assignees);
+        if (!ccReceivers.isEmpty()) {
+            detail.put("ccUserIds", ccReceivers.keySet().stream().map(String::valueOf).toList());
+        }
         return writeJson(detail);
     }
 

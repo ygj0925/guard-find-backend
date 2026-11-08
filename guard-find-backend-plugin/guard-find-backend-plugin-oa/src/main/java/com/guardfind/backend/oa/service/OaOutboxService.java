@@ -52,6 +52,7 @@ public class OaOutboxService {
     public static final String EVENT_APPLICATION_REJECTED = "APPLICATION_REJECTED";
     public static final String EVENT_APPLICATION_RETURNED = "APPLICATION_RETURNED";
     public static final String EVENT_APPLICATION_TERMINATED = "APPLICATION_TERMINATED";
+    public static final String EVENT_APPLICATION_CC = "APPLICATION_CC";
 
     private final OaOutboxRepository repository;
     private final ObjectMapper objectMapper;

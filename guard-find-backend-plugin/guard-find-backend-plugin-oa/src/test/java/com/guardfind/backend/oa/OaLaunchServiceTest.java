@@ -27,10 +27,12 @@ import com.guardfind.backend.oa.model.OaLaunchDetailResp;
 import com.guardfind.backend.oa.model.OaLaunchSubmitReq;
 import com.guardfind.backend.oa.model.OaLaunchSubmitResp;
 import com.guardfind.backend.oa.repository.OaAttachmentRepository;
+import com.guardfind.backend.oa.repository.OaCcRepository;
 import com.guardfind.backend.oa.repository.OaLaunchRepository;
 import com.guardfind.backend.oa.repository.OaOutboxRepository;
 import com.guardfind.backend.oa.service.OaApplicationService;
 import com.guardfind.backend.oa.service.OaAttachmentService;
+import com.guardfind.backend.oa.service.OaCcService;
 import com.guardfind.backend.oa.service.OaLaunchService;
 import com.guardfind.backend.oa.service.OaOutboxService;
 import com.guardfind.backend.oa.staff.OaAssigneeResolver;
@@ -322,6 +324,85 @@ class OaLaunchServiceTest {
         });
     }
 
+    @Test
+    void ccAtLaunchRecordsReceiptsNotifiesAndMarksReadOnView() {
+        runner().run(context -> {
+            Fixture fixture = fixture(context, BPMN);
+            seedEmployee(fixture.jdbc, 1, 102, "ACTIVE");
+            seedEmployee(fixture.jdbc, 2, 103, "ACTIVE");
+            seedFile(fixture.jdbc, 501, TENANT, 101, "stored.pdf", "报告.pdf", 1024);
+            OaLaunchSubmitReq req = new OaLaunchSubmitReq("req-cc", "抄送验证", Map.of("reason", "事假", "approver", List
+                .of(102), "proof", List.of(Map.of("fileId", 501))), List.of(), List.of(103L, 101L, 102L, 103L));
+            OaLaunchSubmitResp resp = fixture.launchService.submit(TENANT, 101, 10, req);
+
+            assertThat(fixture.jdbc
+                .queryForList("SELECT receiver_id FROM oa_cc_receipt WHERE tenant_id = 101 AND application_id = ? ORDER BY id", Long.class, resp
+                    .applicationId())).containsExactly(103L, 102L);
+            assertThat(fixture.jdbc
+                .queryForObject("SELECT COUNT(*) FROM oa_outbox WHERE event_type = 'APPLICATION_CC' AND dedup_key = 'CC:req-cc'", Integer.class))
+                .isEqualTo(1);
+            assertThat(fixture.jdbc
+                .queryForObject("SELECT detail_json FROM oa_approval_audit WHERE application_id = ? AND action = 'SUBMIT'", String.class, resp
+                    .applicationId())).contains("ccUserIds").contains("\"103\"");
+
+            assertThat(fixture.ccService.page(TENANT, 103, null, "UNREAD", 1, 10)).hasSize(1);
+            assertThat(fixture.ccService.count(TENANT, 103, null, "READ")).isZero();
+            assertThat(fixture.ccService.page(TENANT, 101, null, null, 1, 10)).isEmpty();
+            assertThat(fixture.attachmentService.authorizeDownload(TENANT, 103, 501)).isNotNull();
+
+            var viewed = fixture.ccService.detail(TENANT, 103, resp.applicationId());
+            assertThat(viewed.formData()).containsEntry("reason", "事假");
+            assertThat(viewed.ccReceivers()).extracting(r -> r.receiverName()).containsExactly("Carol", "Bob");
+            assertThat(fixture.ccService.count(TENANT, 103, null, "READ")).isEqualTo(1);
+            assertThat(fixture.ccService.page(TENANT, 103, "抄送", null, 1, 10).get(0).readTime()).isNotNull();
+
+            var applicantView = fixture.applicationService.detail(TENANT, 101, resp.applicationId());
+            assertThat(applicantView.ccReceivers()).extracting(r -> r.status()).containsExactly("READ", "UNREAD");
+
+            assertThatThrownBy(() -> fixture.ccService.detail(TENANT, 101, resp.applicationId()))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("抄送记录不存在");
+            assertThatThrownBy(() -> fixture.ccService.detail(202, 103, resp.applicationId()))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("抄送记录不存在");
+            assertThatThrownBy(() -> fixture.ccService.page(TENANT, 103, null, "DONE", 1, 10))
+                .isInstanceOf(BusinessException.class);
+        });
+    }
+
+    @Test
+    void rejectsInvalidCcReceiversWithoutSideEffects() {
+        runner().run(context -> {
+            Fixture fixture = fixture(context, BPMN);
+            seedEmployee(fixture.jdbc, 1, 102, "ACTIVE");
+            seedEmployee(fixture.jdbc, 2, 103, "RESIGNED");
+            Map<String, Object> form = Map.of("reason", "事假", "approver", List.of(102));
+
+            assertThatThrownBy(() -> fixture.launchService
+                .submit(TENANT, 101, 10, new OaLaunchSubmitReq("req-cc-resigned", null, form, List.of(), List
+                    .of(103L)))).isInstanceOf(BusinessException.class).hasMessageContaining("已离职或不是本租户员工");
+            assertThatThrownBy(() -> fixture.launchService
+                .submit(TENANT, 101, 10, new OaLaunchSubmitReq("req-cc-foreign", null, form, List.of(), List.of(999L))))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("已离职或不是本租户员工");
+            List<Long> tooMany = java.util.stream.LongStream.rangeClosed(1000, 1020).boxed().toList();
+            assertThatThrownBy(() -> fixture.launchService
+                .submit(TENANT, 101, 10, new OaLaunchSubmitReq("req-cc-many", null, form, List.of(), tooMany)))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("不能超过 20 人");
+
+            assertThat(fixture.runtimeService.createProcessInstanceQuery().count()).isZero();
+            assertThat(fixture.jdbc.queryForObject("SELECT COUNT(*) FROM oa_application", Integer.class)).isZero();
+            assertThat(fixture.jdbc.queryForObject("SELECT COUNT(*) FROM oa_request_dedup", Integer.class)).isZero();
+            assertThat(fixture.jdbc.queryForObject("SELECT COUNT(*) FROM oa_cc_receipt", Integer.class)).isZero();
+            assertThat(fixture.jdbc.queryForObject("SELECT COUNT(*) FROM oa_outbox", Integer.class)).isZero();
+        });
+    }
+
+    private static void seedEmployee(JdbcTemplate jdbc, long id, long userId, String status) {
+        jdbc.update("INSERT INTO oa_employee (id, tenant_id, user_id, employment_status, deleted) VALUES (?, 101, ?, ?, 0)", id, userId, status);
+    }
+
     private static void seedFile(JdbcTemplate jdbc,
                                  long id,
                                  long tenantId,
@@ -371,11 +452,12 @@ class OaLaunchServiceTest {
             .getBean(TaskService.class), context.getBean(HistoryService.class), repositoryService);
         OaAttachmentService attachmentService = new OaAttachmentService(new OaAttachmentRepository(jdbc), approvalEngine);
         OaOutboxService outboxService = new OaOutboxService(new OaOutboxRepository(jdbc), new ObjectMapper());
+        OaCcService ccService = new OaCcService(new OaCcRepository(jdbc), repository, outboxService);
         OaLaunchService launchService = new OaLaunchService(repository, new OaBpmnValidator(List
-            .of()), new OaFormValueValidator(), attachmentService, launcher, approvalEngine, outboxService, new ObjectMapper(), context
+            .of()), new OaFormValueValidator(), attachmentService, launcher, approvalEngine, outboxService, ccService, new ObjectMapper(), context
                 .getBean(PlatformTransactionManager.class));
         OaApplicationService applicationService = new OaApplicationService(repository);
-        return new Fixture(jdbc, launchService, applicationService, attachmentService, context
+        return new Fixture(jdbc, launchService, applicationService, attachmentService, ccService, context
             .getBean(RuntimeService.class), context.getBean(TaskService.class));
     }
 
@@ -417,6 +499,7 @@ class OaLaunchServiceTest {
     }
 
     private static void createTables(JdbcTemplate jdbc) {
+        jdbc.execute("CREATE TABLE oa_cc_receipt (id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY, tenant_id BIGINT NOT NULL, application_id BIGINT NOT NULL, process_instance_id VARCHAR(64), receiver_id BIGINT NOT NULL, receiver_name VARCHAR(64), source_task_id VARCHAR(64), status VARCHAR(20) NOT NULL DEFAULT 'UNREAD', read_time TIMESTAMP, create_time TIMESTAMP NOT NULL, CONSTRAINT uk_cc UNIQUE (tenant_id, application_id, receiver_id))");
         jdbc.execute("CREATE TABLE sys_dept (id BIGINT PRIMARY KEY, tenant_id BIGINT NOT NULL, name VARCHAR(100) NOT NULL, deleted BIGINT NOT NULL DEFAULT 0)");
         jdbc.execute("CREATE TABLE sys_user (id BIGINT PRIMARY KEY, tenant_id BIGINT NOT NULL, username VARCHAR(64) NOT NULL, nickname VARCHAR(64), dept_id BIGINT, status INT NOT NULL, deleted BIGINT NOT NULL DEFAULT 0)");
         jdbc.execute("CREATE TABLE oa_employee (id BIGINT PRIMARY KEY, tenant_id BIGINT NOT NULL, user_id BIGINT NOT NULL, employment_status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE', deleted BIGINT NOT NULL DEFAULT 0)");
@@ -548,7 +631,7 @@ class OaLaunchServiceTest {
     }
 
     private record Fixture(JdbcTemplate jdbc, OaLaunchService launchService, OaApplicationService applicationService,
-                           OaAttachmentService attachmentService, RuntimeService runtimeService,
+                           OaAttachmentService attachmentService, OaCcService ccService, RuntimeService runtimeService,
                            TaskService taskService) {
     }
 }
