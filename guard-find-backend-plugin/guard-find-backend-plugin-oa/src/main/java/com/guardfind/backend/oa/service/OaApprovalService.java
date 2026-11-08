@@ -173,13 +173,17 @@ public class OaApprovalService {
             ActionContext context = prepareAction(tenantId, userId, taskId);
             touch(tenantId, userId, context.application().id());
             Long originalAssignee = originalAssignee(context);
+            boolean countersign = engine.isMultiInstance(context.task());
+            String instanceId = context.task().getProcessInstanceId();
+            List<Task> before = engine.activeTasks(instanceId, Long.toString(tenantId));
             try {
                 claimForAction(context, userId);
                 engine.complete(context.task().getId());
             } catch (FlowableException | IllegalStateException e) {
                 throw new BusinessException("任务状态已变化，请刷新待办后重试");
             }
-            boolean ended = !engine.instanceExists(context.task().getProcessInstanceId(), Long.toString(tenantId));
+            boolean ended = !engine.instanceExists(instanceId, Long.toString(tenantId));
+            List<Task> cancelled = cancelledTasks(tenantId, before, instanceId, context.task().getId(), ended);
             LocalDateTime now = LocalDateTime.now();
             String status = ended ? "APPROVED" : "RUNNING";
             if (ended) {
@@ -188,6 +192,8 @@ public class OaApprovalService {
             Map<String, Object> detail = actionDetail(requestId, context.task());
             detail.put("processEnded", ended);
             detail.put("applicationStatus", status);
+            detail.put("countersign", countersign);
+            putCancelled(detail, cancelled, "会签完成条件已满足，剩余任务自动终止");
             putProxy(detail, context);
             approvalRepository.insertAudit(tenantId, context.application().id(), context.task()
                 .getProcessInstanceId(), context.task()
@@ -203,18 +209,27 @@ public class OaApprovalService {
             ActionContext context = prepareAction(tenantId, userId, taskId);
             touch(tenantId, userId, context.application().id());
             Long originalAssignee = originalAssignee(context);
+            boolean countersign = engine.isMultiInstance(context.task());
+            String instanceId = context.task().getProcessInstanceId();
+            List<Task> before = engine.activeTasks(instanceId, Long.toString(tenantId));
             try {
                 claimForAction(context, userId);
-                engine.deleteInstance(context.task().getProcessInstanceId(), Long
-                    .toString(tenantId), "REJECT:" + reason);
+                engine.deleteInstance(instanceId, Long.toString(tenantId), "REJECT:" + reason);
             } catch (FlowableException | IllegalStateException e) {
                 throw new BusinessException("任务状态已变化，请刷新待办后重试");
             }
+            List<Task> cancelled = before.stream()
+                .filter(task -> !task.getId().equals(taskId))
+                .filter(task -> engine.wasCancelled(task.getId(), Long.toString(tenantId)))
+                .toList();
             LocalDateTime now = LocalDateTime.now();
             updateStatus(tenantId, userId, context.application().id(), "REJECTED", now);
             Map<String, Object> detail = actionDetail(requestId, context.task());
             detail.put("processEnded", true);
             detail.put("applicationStatus", "REJECTED");
+            detail.put("countersign", countersign);
+            detail.put("veto", true);
+            putCancelled(detail, cancelled, "一票否决：驳回后终止流程并取消剩余任务");
             putProxy(detail, context);
             approvalRepository.insertAudit(tenantId, context.application().id(), context.task()
                 .getProcessInstanceId(), context.task()
@@ -430,6 +445,41 @@ public class OaApprovalService {
         if (context.proxyForId() != null) {
             detail.put("proxyForId", context.proxyForId());
         }
+    }
+
+    /**
+     * 对比动作前后的活动任务，只把引擎确认“非正常完成”的任务记为取消。
+     */
+    private List<Task> cancelledTasks(long tenantId,
+                                      List<Task> before,
+                                      String instanceId,
+                                      String currentTaskId,
+                                      boolean ended) {
+        Set<String> remaining = new LinkedHashSet<>();
+        if (!ended) {
+            for (Task task : engine.activeTasks(instanceId, Long.toString(tenantId))) {
+                remaining.add(task.getId());
+            }
+        }
+        List<Task> cancelled = new ArrayList<>();
+        for (Task task : before) {
+            if (task.getId().equals(currentTaskId) || remaining.contains(task.getId())) {
+                continue;
+            }
+            if (engine.wasCancelled(task.getId(), Long.toString(tenantId))) {
+                cancelled.add(task);
+            }
+        }
+        return cancelled;
+    }
+
+    private static void putCancelled(Map<String, Object> detail, List<Task> cancelled, String reason) {
+        if (cancelled.isEmpty()) {
+            return;
+        }
+        detail.put("cancelledTaskIds", cancelled.stream().map(Task::getId).toList());
+        detail.put("cancelledAssignees", cancelled.stream().map(Task::getAssignee).filter(Objects::nonNull).toList());
+        detail.put("cancelReason", reason);
     }
 
     private static Long parseLong(String value) {

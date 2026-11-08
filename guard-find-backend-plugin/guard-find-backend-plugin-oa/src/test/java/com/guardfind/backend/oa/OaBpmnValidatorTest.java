@@ -357,6 +357,52 @@ class OaBpmnValidatorTest {
         assertThat(result.groupVariables()).containsExactly("groupVar");
     }
 
+    private static final String COUNTERSIGN_PROCESS = """
+        <bpmn:startEvent id="start"/>
+        <bpmn:sequenceFlow id="flow1" sourceRef="start" targetRef="review"/>
+        <bpmn:userTask id="review" name="三方会签" flowable:assignee="${reviewer}">
+          <bpmn:multiInstanceLoopCharacteristics isSequential="false"
+                                                flowable:collection="${reviewerList}"
+                                                flowable:elementVariable="reviewer">
+            <bpmn:completionCondition xsi:type="bpmn:tFormalExpression">${nrOfCompletedInstances / nrOfInstances >= 0.6}</bpmn:completionCondition>
+          </bpmn:multiInstanceLoopCharacteristics>
+        </bpmn:userTask>
+        <bpmn:sequenceFlow id="flow2" sourceRef="review" targetRef="end"/>
+        <bpmn:endEvent id="end"/>
+        """;
+
+    @Test
+    void acceptsCountersignProcessAndKeepsVariableMultiValued() {
+        OaBpmnValidationResult result = validate(document(COUNTERSIGN_PROCESS));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.errors()).isEmpty();
+        assertThat(result.assigneeVariables()).containsExactly("reviewer");
+        assertThat(result.singleAssigneeVariables()).isEmpty();
+    }
+
+    @Test
+    void rejectsUnsafeCountersignCompletionCondition() {
+        String model = document(COUNTERSIGN_PROCESS).replace(">= 0.6", ">= 0.6 || true");
+
+        assertInvalid(model, "完成条件不安全");
+    }
+
+    @Test
+    void rejectsCountersignCollectionNotDerivedFromElementVariable() {
+        String model = document(COUNTERSIGN_PROCESS).replace("${reviewerList}", "${approvers}");
+
+        assertInvalid(model, "集合必须写成 ${reviewerList}");
+    }
+
+    @Test
+    void rejectsCountersignWithCandidateScope() {
+        String model = document(COUNTERSIGN_PROCESS)
+            .replace("flowable:assignee=\"${reviewer}\"", "flowable:candidateUsers=\"${reviewer}\"");
+
+        assertInvalid(model, "只能使用 assignee");
+    }
+
     @Test
     void digestChangesWithContent() {
         String first = validate(document(SAFE_PROCESS)).digest();

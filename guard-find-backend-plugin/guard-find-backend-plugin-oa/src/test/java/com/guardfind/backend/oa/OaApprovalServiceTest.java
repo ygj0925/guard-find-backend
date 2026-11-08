@@ -131,6 +131,69 @@ class OaApprovalServiceTest {
         </bpmn:definitions>
         """;
 
+    private static final String COUNTERSIGN_BPMN = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                          xmlns:flowable="http://flowable.org/bpmn"
+                          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                          targetNamespace="http://guardfind.com/oa/bpmn">
+          <bpmn:process id="oaApproval" name="比例会签" isExecutable="true">
+            <bpmn:startEvent id="start"/>
+            <bpmn:sequenceFlow id="flow1" sourceRef="start" targetRef="review"/>
+            <bpmn:userTask id="review" name="会签审批" flowable:assignee="${reviewer}">
+              <bpmn:multiInstanceLoopCharacteristics isSequential="false"
+                                                    flowable:collection="${reviewerList}"
+                                                    flowable:elementVariable="reviewer">
+                <bpmn:completionCondition xsi:type="bpmn:tFormalExpression">${nrOfCompletedInstances / nrOfInstances >= 0.5}</bpmn:completionCondition>
+              </bpmn:multiInstanceLoopCharacteristics>
+            </bpmn:userTask>
+            <bpmn:sequenceFlow id="flow2" sourceRef="review" targetRef="end"/>
+            <bpmn:endEvent id="end"/>
+          </bpmn:process>
+        </bpmn:definitions>
+        """;
+
+    private static final String COUNTERSIGN_ALL_BPMN = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                          xmlns:flowable="http://flowable.org/bpmn"
+                          targetNamespace="http://guardfind.com/oa/bpmn">
+          <bpmn:process id="oaApproval" name="全票会签" isExecutable="true">
+            <bpmn:startEvent id="start"/>
+            <bpmn:sequenceFlow id="flow1" sourceRef="start" targetRef="review"/>
+            <bpmn:userTask id="review" name="会签审批" flowable:assignee="${reviewer}">
+              <bpmn:multiInstanceLoopCharacteristics isSequential="false"
+                                                    flowable:collection="${reviewerList}"
+                                                    flowable:elementVariable="reviewer"/>
+            </bpmn:userTask>
+            <bpmn:sequenceFlow id="flow2" sourceRef="review" targetRef="end"/>
+            <bpmn:endEvent id="end"/>
+          </bpmn:process>
+        </bpmn:definitions>
+        """;
+
+    private static final String COUNTERSIGN_THREE_BPMN = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                          xmlns:flowable="http://flowable.org/bpmn"
+                          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                          targetNamespace="http://guardfind.com/oa/bpmn">
+          <bpmn:process id="oaApproval" name="三人比例会签" isExecutable="true">
+            <bpmn:startEvent id="start"/>
+            <bpmn:sequenceFlow id="flow1" sourceRef="start" targetRef="review"/>
+            <bpmn:userTask id="review" name="会签审批" flowable:assignee="${reviewer}">
+              <bpmn:multiInstanceLoopCharacteristics isSequential="false"
+                                                    flowable:collection="${reviewerList}"
+                                                    flowable:elementVariable="reviewer">
+                <bpmn:completionCondition xsi:type="bpmn:tFormalExpression">${nrOfCompletedInstances / nrOfInstances >= 0.6}</bpmn:completionCondition>
+              </bpmn:multiInstanceLoopCharacteristics>
+            </bpmn:userTask>
+            <bpmn:sequenceFlow id="flow2" sourceRef="review" targetRef="end"/>
+            <bpmn:endEvent id="end"/>
+          </bpmn:process>
+        </bpmn:definitions>
+        """;
+
     private static final String SCHEMA = """
         {"version":1,"fields":[
           {"id":"reason","key":"reason","label":"事由","type":"text","required":true}
@@ -487,6 +550,97 @@ class OaApprovalServiceTest {
         });
     }
 
+    @Test
+    void countersignRatioCompletesAndCancelsRemainingTasks() {
+        runner().run(context -> {
+            Fixture fixture = fixture(context, COUNTERSIGN_BPMN);
+            long applicationId = fixture.submitCountersign("req-countersign-1", "APPROVER");
+            assertThat(fixture.reviewerTasks()).hasSize(2);
+            String cancelledTaskId = fixture.taskId(103);
+            String taskId = fixture.taskId(102);
+
+            OaApprovalActionResp result = fixture.approvalService.approve(TENANT, 102, taskId, action("cs-approve-1"));
+
+            assertThat(result.status()).isEqualTo("APPROVED");
+            assertThat(fixture.applicationStatus(applicationId)).isEqualTo("APPROVED");
+            assertThat(fixture.taskService.createTaskQuery().taskId(cancelledTaskId).count()).isZero();
+            assertThat(fixture.approvalService.todo(TENANT, 103, null, 1, 10).items()).isEmpty();
+            assertThat(fixture.runtimeService.createProcessInstanceQuery().count()).isZero();
+            String detail = fixture.jdbc
+                .queryForObject("SELECT detail_json FROM oa_approval_audit WHERE action = 'APPROVE'", String.class);
+            assertThat(detail).contains("\"countersign\":true", "\"cancelReason\"", cancelledTaskId);
+        });
+    }
+
+    @Test
+    void countersignAllVoteWaitsForEveryApproverAndReplaysRequest() {
+        runner().run(context -> {
+            Fixture fixture = fixture(context, COUNTERSIGN_ALL_BPMN);
+            long applicationId = fixture.submitCountersign("req-countersign-all", "APPROVER");
+            assertThat(fixture.reviewerTasks()).hasSize(2);
+            String firstTask = fixture.taskId(102);
+
+            OaApprovalActionResp first = fixture.approvalService.approve(TENANT, 102, firstTask, action("cs-all-1"));
+            assertThat(first.status()).isEqualTo("RUNNING");
+            assertThat(fixture.reviewerTasks()).hasSize(1);
+            OaApprovalActionResp replay = fixture.approvalService.approve(TENANT, 102, firstTask, action("cs-all-1"));
+            assertThat(replay.replayed()).isTrue();
+            assertThat(fixture.jdbc
+                .queryForObject("SELECT COUNT(*) FROM oa_approval_audit WHERE action = 'APPROVE'", Integer.class))
+                .isEqualTo(1);
+
+            String lastTask = fixture.taskId(103);
+            OaApprovalActionResp second = fixture.approvalService.approve(TENANT, 103, lastTask, action("cs-all-2"));
+            assertThat(second.status()).isEqualTo("APPROVED");
+            assertThat(fixture.applicationStatus(applicationId)).isEqualTo("APPROVED");
+            assertThat(fixture.runtimeService.createProcessInstanceQuery().count()).isZero();
+        });
+    }
+
+    @Test
+    void countersignRejectVetoesAndCancelsRemainingTasks() {
+        runner().run(context -> {
+            Fixture fixture = fixture(context, COUNTERSIGN_ALL_BPMN);
+            long applicationId = fixture.submitCountersign("req-countersign-veto", "APPROVER");
+            String taskId = fixture.taskId(102);
+            String otherTaskId = fixture.taskId(103);
+
+            OaApprovalActionResp result = fixture.approvalService
+                .reject(TENANT, 102, taskId, new OaApprovalActionReq("cs-veto-1", "资料不全"));
+
+            assertThat(result.status()).isEqualTo("REJECTED");
+            assertThat(fixture.applicationStatus(applicationId)).isEqualTo("REJECTED");
+            assertThat(fixture.taskService.createTaskQuery().taskId(otherTaskId).count()).isZero();
+            String detail = fixture.jdbc
+                .queryForObject("SELECT detail_json FROM oa_approval_audit WHERE action = 'REJECT'", String.class);
+            assertThat(detail).contains("\"veto\":true", "\"countersign\":true", otherTaskId, "\"cancelReason\"");
+            assertThatThrownBy(() -> fixture.approvalService.approve(TENANT, 103, otherTaskId, action("cs-veto-late")))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("任务不存在或无权处理");
+        });
+    }
+
+    @Test
+    void countersignRatioCancelsOnlyRemainingTasksAfterThreshold() {
+        runner().run(context -> {
+            Fixture fixture = fixture(context, COUNTERSIGN_THREE_BPMN);
+            fixture.submitCountersign("req-countersign-three", "REVIEWERS");
+            assertThat(fixture.reviewerTasks()).hasSize(3);
+
+            fixture.approvalService.approve(TENANT, 102, fixture.taskId(102), action("cs-three-1"));
+            assertThat(fixture.reviewerTasks()).hasSize(2);
+            String remainingTaskId = fixture.taskId(101);
+
+            OaApprovalActionResp result = fixture.approvalService.approve(TENANT, 103, fixture
+                .taskId(103), action("cs-three-2"));
+            assertThat(result.status()).isEqualTo("APPROVED");
+            assertThat(fixture.taskService.createTaskQuery().taskId(remainingTaskId).count()).isZero();
+            assertThat(fixture.jdbc
+                .queryForObject("SELECT COUNT(*) FROM oa_approval_audit WHERE action = 'APPROVE'", Integer.class))
+                .isEqualTo(2);
+        });
+    }
+
     private static OaApprovalActionReq action(String requestId) {
         return new OaApprovalActionReq(requestId, null);
     }
@@ -659,12 +813,16 @@ class OaApprovalServiceTest {
 
         @Override
         public boolean enabledPosition(long tenantId, String code) {
-            return tenantId == TENANT && "APPROVER".equals(code);
+            return tenantId == TENANT && ("APPROVER".equals(code) || "REVIEWERS".equals(code));
         }
 
         @Override
         public List<Long> activeUsersByPosition(long tenantId, String code) {
-            return "APPROVER".equals(code) ? List.of(102L, 103L) : List.of();
+            return switch (code) {
+                case "APPROVER" -> List.of(102L, 103L);
+                case "REVIEWERS" -> List.of(101L, 102L, 103L);
+                default -> List.of();
+            };
         }
 
         @Override
@@ -693,6 +851,21 @@ class OaApprovalServiceTest {
                 .submit(TENANT, 101, 10, new OaLaunchSubmitReq("req-submit-candidate", "候选审批", Map
                     .of("reason", "出差"), List.of(new OaAssigneeBindingReq("manager", "POSITION", "APPROVER"))));
             return resp.applicationId();
+        }
+
+        private long submitCountersign(String requestId, String position) {
+            OaLaunchSubmitResp resp = launchService.submit(TENANT, 101, 10, new OaLaunchSubmitReq(requestId, "会签审批", Map
+                .of("reason", "出差"), List.of(new OaAssigneeBindingReq("reviewer", "POSITION", position))));
+            return resp.applicationId();
+        }
+
+        private List<Task> reviewerTasks() {
+            return taskService.createTaskQuery()
+                .taskTenantId(Long.toString(TENANT))
+                .taskDefinitionKey("review")
+                .orderByTaskAssignee()
+                .asc()
+                .list();
         }
 
         private String managerTaskId() {

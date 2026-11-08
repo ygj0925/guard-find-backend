@@ -78,7 +78,10 @@ public class OaProcessLauncher {
                     throw new OaAssigneeUnavailableException("审批人变量 %s 用于 assignee，只能解析出一名员工，实际 %d 名"
                         .formatted(variableName, candidates.size()));
                 }
-                processVariables.put(variableName, String.join(",", candidates.stream().map(String::valueOf).toList()));
+                List<String> resolved = candidates.stream().map(String::valueOf).toList();
+                processVariables.put(variableName, String.join(",", resolved));
+                // 会签节点按 ${变量List} 读取实例集合；单审批人变量同时保留原逗号串语义
+                processVariables.put(variableName + "List", resolved);
             });
         }
         return engineTemplate.start(processDefinitionKey, Long.toString(tenantId), businessKey, processVariables);

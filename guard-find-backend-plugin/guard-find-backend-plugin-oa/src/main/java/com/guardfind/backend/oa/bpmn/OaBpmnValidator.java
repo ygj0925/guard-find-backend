@@ -92,6 +92,7 @@ public class OaBpmnValidator {
     private static final Pattern ISO_CYCLE = Pattern.compile("R[0-9]*/[0-9A-Z./]+");
     private static final Pattern CRON = Pattern.compile("[0-9*?/,: \\-]+");
     private static final Pattern ISO_DATE = Pattern.compile("[0-9T:.+\\-Z]+");
+    private static final Pattern ELEMENT_VARIABLE = Pattern.compile("[A-Za-z_][A-Za-z0-9_]*");
 
     private final Set<String> allowedServiceHandlers;
 
@@ -269,8 +270,8 @@ public class OaBpmnValidator {
             case "startEvent" -> validateBoundaryChildren(element, Set.of("outgoing"), "开始事件 " + id, errors);
             case "endEvent" -> validateBoundaryChildren(element, Set.of("incoming"), "结束事件 " + id, errors);
             case "userTask" -> {
-                validateTaskChildren(element, errors);
-                validateUserTask(element, id, errors, assignees, assigneeVariables, singleAssigneeVariables, staticAssignments, groupVariables);
+                MultiInstance multiInstance = validateUserTaskChildren(element, id, errors);
+                validateUserTask(element, id, errors, assignees, assigneeVariables, singleAssigneeVariables, staticAssignments, groupVariables, multiInstance);
             }
             case "serviceTask" -> {
                 validateTaskChildren(element, errors);
@@ -284,7 +285,7 @@ public class OaBpmnValidator {
             case "boundaryEvent" -> validateBoundaryEvent(element, id, nodes, errors);
             case "sequenceFlow" -> validateSequenceFlow(element, id, nodes, errors);
             case "timerEventDefinition" -> validateTimer(element, id, errors);
-            case "conditionExpression" -> {
+            case "conditionExpression", "completionCondition" -> {
                 if (!childElements(element).isEmpty()) {
                     addError(errors, "条件表达式不允许子节点");
                 }
@@ -303,7 +304,8 @@ public class OaBpmnValidator {
                                   Set<String> assigneeVariables,
                                   Set<String> singleAssigneeVariables,
                                   Set<String> staticAssignments,
-                                  Set<String> groupVariables) {
+                                  Set<String> groupVariables,
+                                  MultiInstance multiInstance) {
         String assignee = flowableAttribute(element, "assignee");
         String candidateUsers = flowableAttribute(element, "candidateUsers");
         String candidateGroups = flowableAttribute(element, "candidateGroups");
@@ -314,9 +316,18 @@ public class OaBpmnValidator {
         validateAssignment("assignee", assignee, id, errors);
         validateAssignment("candidateUsers", candidateUsers, id, errors);
         validateAssignment("candidateGroups", candidateGroups, id, errors);
-        collectAssignments("assignee", assignee, id, assignees, assigneeVariables, singleAssigneeVariables, staticAssignments, groupVariables, errors);
-        collectAssignments("candidateUsers", candidateUsers, id, assignees, assigneeVariables, singleAssigneeVariables, staticAssignments, groupVariables, errors);
-        collectAssignments("candidateGroups", candidateGroups, id, assignees, assigneeVariables, singleAssigneeVariables, staticAssignments, groupVariables, errors);
+        if (multiInstance != null) {
+            String expected = "${" + multiInstance.elementVariable() + "}";
+            if (!assignee.equals(expected)) {
+                addError(errors, "会签用户任务 " + id + " 的 assignee 必须是 " + expected);
+            }
+            if (!candidateUsers.isBlank() || !candidateGroups.isBlank()) {
+                addError(errors, "会签用户任务 " + id + " 只能使用 assignee，不能配置候选范围");
+            }
+        }
+        collectAssignments("assignee", assignee, id, assignees, assigneeVariables, singleAssigneeVariables, staticAssignments, groupVariables, errors, multiInstance == null);
+        collectAssignments("candidateUsers", candidateUsers, id, assignees, assigneeVariables, singleAssigneeVariables, staticAssignments, groupVariables, errors, false);
+        collectAssignments("candidateGroups", candidateGroups, id, assignees, assigneeVariables, singleAssigneeVariables, staticAssignments, groupVariables, errors, false);
     }
 
     private void collectAssignments(String name,
@@ -327,7 +338,8 @@ public class OaBpmnValidator {
                                     Set<String> singleAssigneeVariables,
                                     Set<String> staticAssignments,
                                     Set<String> groupVariables,
-                                    List<String> errors) {
+                                    List<String> errors,
+                                    boolean single) {
         if (value.isBlank()) {
             return;
         }
@@ -340,7 +352,7 @@ public class OaBpmnValidator {
                 groupVariables.add(variable);
             } else {
                 assigneeVariables.add(variable);
-                if ("assignee".equals(name)) {
+                if ("assignee".equals(name) && single) {
                     singleAssigneeVariables.add(variable);
                 }
             }
@@ -564,6 +576,67 @@ public class OaBpmnValidator {
         validateBoundaryChildren(element, Set.of("incoming", "outgoing"), "任务 " + element.getAttribute("id"), errors);
     }
 
+    /**
+     * 用户任务允许多实例子节点；会签集合按“审批人变量 + List”约定由发起端注入。
+     */
+    private MultiInstance validateUserTaskChildren(Element element, String id, List<String> errors) {
+        List<Element> loops = new ArrayList<>();
+        for (Element child : childElements(element)) {
+            if (!isBpmn(child)) {
+                addError(errors, "任务 " + id + " 不允许子节点: " + describe(child));
+                continue;
+            }
+            String local = localName(child);
+            if ("multiInstanceLoopCharacteristics".equals(local)) {
+                loops.add(child);
+            } else if (!"incoming".equals(local) && !"outgoing".equals(local)) {
+                addError(errors, "任务 " + id + " 不允许子节点: " + local);
+            }
+        }
+        if (loops.isEmpty()) {
+            return null;
+        }
+        if (loops.size() > 1) {
+            addError(errors, "会签用户任务 " + id + " 只能包含一个多实例配置");
+        }
+        return validateMultiInstance(id, loops.get(0), errors);
+    }
+
+    private MultiInstance validateMultiInstance(String id, Element loop, List<String> errors) {
+        String sequential = loop.getAttribute("isSequential").trim();
+        if (!sequential.isEmpty() && !"true".equals(sequential) && !"false".equals(sequential)) {
+            addError(errors, "会签用户任务 " + id + " 的 isSequential 只能是 true 或 false");
+        }
+        String elementVariable = flowableAttribute(loop, "elementVariable").trim();
+        if (!ELEMENT_VARIABLE.matcher(elementVariable).matches()) {
+            addError(errors, "会签用户任务 " + id + " 的 flowable:elementVariable 必须是合法变量名");
+        }
+        String collection = flowableAttribute(loop, "collection").trim();
+        String expectedCollection = "${" + elementVariable + "List}";
+        if (!expectedCollection.equals(collection)) {
+            addError(errors, "会签用户任务 " + id + " 的集合必须写成 " + expectedCollection);
+        }
+        Element completion = null;
+        for (Element child : childElements(loop)) {
+            if (!isBpmn(child) || !"completionCondition".equals(localName(child))) {
+                addError(errors, "会签用户任务 " + id + " 不允许子节点: " + describe(child));
+                continue;
+            }
+            if (completion != null) {
+                addError(errors, "会签用户任务 " + id + " 只能有一个完成条件");
+            }
+            completion = child;
+        }
+        if (completion != null) {
+            try {
+                OaCountersignConditionValidator.requireSafe(completion.getTextContent());
+            } catch (IllegalArgumentException e) {
+                addError(errors, "会签用户任务 " + id + " 的完成条件不安全: " + e.getMessage());
+            }
+        }
+        return new MultiInstance(elementVariable);
+    }
+
     private static void validateGatewayChildren(Element element, List<String> errors) {
         validateBoundaryChildren(element, Set.of("incoming", "outgoing"), "网关 " + element.getAttribute("id"), errors);
     }
@@ -626,8 +699,8 @@ public class OaBpmnValidator {
                 if ("definitions".equals(local) && "schemaLocation".equals(attrName)) {
                     continue;
                 }
-                if (("conditionExpression".equals(local) || TIMER_TYPES.contains(local)) && "type"
-                    .equals(attrName) && isFormalExpression(attr.getValue())) {
+                if (("conditionExpression".equals(local) || "completionCondition".equals(local) || TIMER_TYPES
+                    .contains(local)) && "type".equals(attrName) && isFormalExpression(attr.getValue())) {
                     continue;
                 }
                 addError(errors, "节点 " + local + " 不允许属性 xsi:" + attrName);
@@ -658,6 +731,7 @@ public class OaBpmnValidator {
         return switch (local) {
             case "userTask" -> Set.of("assignee", "candidateUsers", "candidateGroups").contains(attrName);
             case "serviceTask" -> "class".equals(attrName);
+            case "multiInstanceLoopCharacteristics" -> Set.of("collection", "elementVariable").contains(attrName);
             default -> false;
         };
     }
@@ -779,6 +853,9 @@ public class OaBpmnValidator {
         return value == null || value.isBlank() ? null : value;
     }
 
+    private record MultiInstance(String elementVariable) {
+    }
+
     private static void addError(List<String> errors, String message) {
         if (errors.size() < MAX_ERRORS) {
             errors.add(message);
@@ -790,7 +867,7 @@ public class OaBpmnValidator {
     private static Set<String> allowedBpmnElements() {
         Set<String> elements = new HashSet<>(FLOW_NODE_TYPES);
         elements.addAll(Set
-            .of("definitions", "process", "sequenceFlow", "conditionExpression", "timerEventDefinition", "timeDuration", "timeDate", "timeCycle", "incoming", "outgoing"));
+            .of("definitions", "process", "sequenceFlow", "conditionExpression", "completionCondition", "multiInstanceLoopCharacteristics", "timerEventDefinition", "timeDuration", "timeDate", "timeCycle", "incoming", "outgoing"));
         return Set.copyOf(elements);
     }
 
@@ -807,6 +884,8 @@ public class OaBpmnValidator {
         attributes.put("boundaryEvent", Set.of("id", "name", "attachedToRef", "cancelActivity"));
         attributes.put("sequenceFlow", Set.of("id", "name", "sourceRef", "targetRef"));
         attributes.put("conditionExpression", Set.of("id", "name"));
+        attributes.put("completionCondition", Set.of("id", "name"));
+        attributes.put("multiInstanceLoopCharacteristics", Set.of("id", "name", "isSequential"));
         attributes.put("timerEventDefinition", Set.of("id"));
         attributes.put("timeDuration", Set.of("id"));
         attributes.put("timeDate", Set.of("id"));

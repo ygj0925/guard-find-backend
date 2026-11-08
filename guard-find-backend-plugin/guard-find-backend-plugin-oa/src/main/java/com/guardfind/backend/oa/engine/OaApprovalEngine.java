@@ -21,6 +21,7 @@ import org.flowable.bpmn.model.FlowElement;
 import org.flowable.bpmn.model.InclusiveGateway;
 import org.flowable.bpmn.model.ParallelGateway;
 import org.flowable.bpmn.model.Process;
+import org.flowable.bpmn.model.UserTask;
 import org.flowable.engine.HistoryService;
 import org.flowable.engine.RepositoryService;
 import org.flowable.engine.RuntimeService;
@@ -148,6 +149,35 @@ public class OaApprovalEngine {
 
     public void complete(String taskId) {
         taskService.complete(taskId);
+    }
+
+    /**
+     * 当前任务是否为会签（多实例）节点。
+     */
+    public boolean isMultiInstance(Task task) {
+        if (task == null || task.getProcessDefinitionId() == null || task.getTaskDefinitionKey() == null) {
+            return false;
+        }
+        BpmnModel model = repositoryService.getBpmnModel(task.getProcessDefinitionId());
+        return model != null && model.getFlowElement(task
+            .getTaskDefinitionKey()) instanceof UserTask userTask && userTask.getLoopCharacteristics() != null;
+    }
+
+    /**
+     * 历史任务是否因流程终止/会签条件满足被取消（区别于正常完成）。
+     */
+    public boolean wasCancelled(String taskId, String tenantId) {
+        if (taskId == null || taskId.isBlank()) {
+            return false;
+        }
+        HistoricTaskInstance historic = historyService.createHistoricTaskInstanceQuery()
+            .taskId(taskId)
+            .taskTenantId(tenantId)
+            .singleResult();
+        if (historic == null || historic.getDeleteReason() == null) {
+            return false;
+        }
+        return !"completed".equals(historic.getDeleteReason());
     }
 
     public boolean instanceExists(String processInstanceId, String tenantId) {
