@@ -20,6 +20,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.guardfind.backend.oa.bpmn.OaBpmnValidationResult;
 import com.guardfind.backend.oa.bpmn.OaBpmnValidator;
+import com.guardfind.backend.oa.engine.OaApprovalEngine;
 import com.guardfind.backend.oa.form.OaFormValueValidator;
 import com.guardfind.backend.oa.launch.OaLaunchScope;
 import com.guardfind.backend.oa.model.OaAssigneeBindingReq;
@@ -76,6 +77,8 @@ public class OaLaunchService {
     private final OaFormValueValidator formValueValidator;
     private final OaAttachmentService attachmentService;
     private final OaProcessLauncher launcher;
+    private final OaApprovalEngine engine;
+    private final OaOutboxService outboxService;
     private final ObjectMapper objectMapper;
     private final TransactionTemplate transactionTemplate;
 
@@ -84,6 +87,8 @@ public class OaLaunchService {
                            OaFormValueValidator formValueValidator,
                            OaAttachmentService attachmentService,
                            OaProcessLauncher launcher,
+                           OaApprovalEngine engine,
+                           OaOutboxService outboxService,
                            ObjectMapper objectMapper,
                            PlatformTransactionManager transactionManager) {
         this.repository = repository;
@@ -91,6 +96,8 @@ public class OaLaunchService {
         this.formValueValidator = formValueValidator;
         this.attachmentService = attachmentService;
         this.launcher = launcher;
+        this.engine = engine;
+        this.outboxService = outboxService;
         this.objectMapper = objectMapper;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
@@ -195,6 +202,14 @@ public class OaLaunchService {
             .attachments(), now);
         repository.insertAudit(tenantId, applicationId, instance.getId(), "SUBMIT", userId, profile
             .name(), requestId, auditDetail(requestId, release, bindings), now);
+        List<Long> recipients = engine.activeTasks(instance.getId(), Long.toString(tenantId))
+            .stream()
+            .flatMap(task -> engine.recipientIds(task).stream())
+            .distinct()
+            .toList();
+        outboxService.recordNotification(tenantId, OaOutboxService.AGGREGATE_APPLICATION, Long
+            .toString(applicationId), OaOutboxService.EVENT_APPLICATION_SUBMITTED, "SUBMIT:" + requestId, applicationId, null, "TODO", "待审批：" + title, "「" + release
+                .modelName() + "」已提交，等待您审批", recipients);
 
         OaLaunchSubmitResp resp = new OaLaunchSubmitResp(applicationId, businessKey, instance.getId(), false);
         repository.markDedupSucceeded(tenantId, userId, COMMAND_SUBMIT, requestId, writeJson(resp));

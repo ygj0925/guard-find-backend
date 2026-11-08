@@ -30,6 +30,8 @@ import org.flowable.identitylink.api.history.HistoricIdentityLink;
 import org.flowable.task.api.Task;
 import org.flowable.task.api.history.HistoricTaskInstance;
 
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 
 /**
@@ -197,6 +199,63 @@ public class OaApprovalEngine {
             .orderByTaskCreateTime()
             .asc()
             .list();
+    }
+
+    /**
+     * 租户内全部活动任务，供超期扫描使用；调用方必须分页或限制条数。
+     */
+    public List<Task> activeTasksOfTenant(String tenantId, int limit) {
+        requireText(tenantId, "租户不能为空");
+        return taskService.createTaskQuery()
+            .taskTenantId(tenantId)
+            .orderByTaskCreateTime()
+            .asc()
+            .listPage(0, Math.max(1, limit));
+    }
+
+    /**
+     * 任务接收人：已领取人为 assignee，未领取时取候选用户；候选组暂不展开。
+     */
+    public List<Long> recipientIds(Task task) {
+        LinkedHashSet<Long> ids = new LinkedHashSet<>();
+        Long assignee = parseLong(task.getAssignee());
+        if (assignee != null) {
+            ids.add(assignee);
+        }
+        if (task.getId() != null) {
+            for (org.flowable.identitylink.api.IdentityLink link : taskService.getIdentityLinksForTask(task.getId())) {
+                Long userId = parseLong(link.getUserId());
+                if (userId != null) {
+                    ids.add(userId);
+                }
+            }
+        }
+        return new ArrayList<>(ids);
+    }
+
+    /**
+     * 历史任务对应的流程实例；用于申请人按任务/申请催办时定位实例。
+     */
+    public String processInstanceIdOfTask(String taskId, String tenantId) {
+        if (taskId == null || taskId.isBlank()) {
+            return null;
+        }
+        HistoricTaskInstance historic = historyService.createHistoricTaskInstanceQuery()
+            .taskId(taskId)
+            .taskTenantId(tenantId)
+            .singleResult();
+        return historic == null ? null : historic.getProcessInstanceId();
+    }
+
+    private static Long parseLong(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return Long.parseLong(value);
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     public void deleteInstance(String processInstanceId, String tenantId, String reason) {

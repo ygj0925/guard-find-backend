@@ -144,6 +144,18 @@ class OaEngineLiquibaseMySqlTest {
             assertThatThrownBy(() -> execute(connection, outbox(TEST_TENANT_B, "oa-test-event-1")))
                 .isInstanceOf(SQLException.class)
                 .hasMessageContaining("Duplicate entry");
+            execute(connection, outboxWithDedup(TEST_TENANT_A, "oa-test-event-2", "oa-test-outbox-dedup-1"));
+            assertThatThrownBy(() -> execute(connection, outboxWithDedup(TEST_TENANT_A, "oa-test-event-3", "oa-test-outbox-dedup-1")))
+                .isInstanceOf(SQLException.class)
+                .hasMessageContaining("Duplicate entry");
+            execute(connection, outboxWithDedup(TEST_TENANT_B, "oa-test-event-3", "oa-test-outbox-dedup-1"));
+
+            execute(connection, notification(TEST_TENANT_A, 8801L, "oa-test-notification-1"));
+            assertThatThrownBy(() -> execute(connection, notification(TEST_TENANT_A, 8801L, "oa-test-notification-1")))
+                .isInstanceOf(SQLException.class)
+                .hasMessageContaining("Duplicate entry");
+            execute(connection, notification(TEST_TENANT_A, 8802L, "oa-test-notification-1"));
+            execute(connection, notification(TEST_TENANT_B, 8801L, "oa-test-notification-1"));
 
             execute(connection, dedup(TEST_TENANT_A, 1L, "APPROVE", "oa-test-dedup-1"));
             assertThatThrownBy(() -> execute(connection, dedup(TEST_TENANT_A, 1L, "APPROVE", "oa-test-dedup-1")))
@@ -210,9 +222,13 @@ class OaEngineLiquibaseMySqlTest {
         assertThat(indexes(connection, "oa_attachment_link"))
             .contains("uk_tenant_file", "idx_tenant_application", "idx_tenant_business", "idx_tenant_scan");
         assertThat(columns(connection, "oa_outbox"))
-            .contains("tenant_id", "event_id", "aggregate_type", "aggregate_id", "event_type", "payload", "status", "retry_count", "next_retry_time", "last_error", "sent_time");
+            .contains("tenant_id", "event_id", "aggregate_type", "aggregate_id", "event_type", "payload", "dedup_key", "status", "retry_count", "next_retry_time", "last_error", "sent_time");
         assertThat(indexes(connection, "oa_outbox"))
-            .contains("uk_event_id", "idx_status_retry", "idx_tenant_aggregate");
+            .contains("uk_event_id", "uk_tenant_dedup", "idx_status_retry", "idx_tenant_aggregate");
+        assertThat(columns(connection, "oa_notification"))
+            .contains("tenant_id", "user_id", "type", "title", "content", "application_id", "task_id", "dedup_key", "status", "read_time", "create_time");
+        assertThat(indexes(connection, "oa_notification"))
+            .contains("uk_tenant_user_dedup", "idx_tenant_user_status", "idx_tenant_application");
         assertThat(columns(connection, "oa_request_dedup"))
             .contains("tenant_id", "actor_id", "command", "request_id", "status", "result_json", "expire_time");
         assertThat(indexes(connection, "oa_request_dedup"))
@@ -232,8 +248,8 @@ class OaEngineLiquibaseMySqlTest {
 
     private static void clearTestData(Connection connection) throws SQLException {
         for (String table : new String[] {"oa_employee_position", "oa_employee", "oa_position", "oa_request_dedup",
-            "oa_outbox", "oa_attachment_link", "oa_cc_receipt", "oa_approval_audit", "oa_application",
-            "oa_process_release", "oa_form_version", "oa_form", "oa_process_model"}) {
+            "oa_notification", "oa_outbox", "oa_attachment_link", "oa_cc_receipt", "oa_approval_audit",
+            "oa_application", "oa_process_release", "oa_form_version", "oa_form", "oa_process_model"}) {
             execute(connection, "DELETE FROM " + table + " WHERE tenant_id IN (" + TEST_TENANT_A + "," + TEST_TENANT_B + ")");
         }
     }
@@ -311,6 +327,16 @@ class OaEngineLiquibaseMySqlTest {
     private static String outbox(long tenantId, String eventId) {
         return "INSERT INTO oa_outbox (tenant_id, event_id, aggregate_type, aggregate_id, event_type, payload, status, retry_count, create_time) VALUES (%d, '%s', 'APPLICATION', '9901', 'APPLICATION_SUBMITTED', '{}', 'PENDING', 0, NOW())"
             .formatted(tenantId, eventId);
+    }
+
+    private static String outboxWithDedup(long tenantId, String eventId, String dedupKey) {
+        return "INSERT INTO oa_outbox (tenant_id, event_id, aggregate_type, aggregate_id, event_type, payload, dedup_key, status, retry_count, create_time) VALUES (%d, '%s', 'APPLICATION', '9901', 'APPLICATION_SUBMITTED', '{}', '%s', 'PENDING', 0, NOW())"
+            .formatted(tenantId, eventId, dedupKey);
+    }
+
+    private static String notification(long tenantId, long userId, String dedupKey) {
+        return "INSERT INTO oa_notification (tenant_id, user_id, type, title, dedup_key, status, create_time) VALUES (%d, %d, 'TODO', '测试通知', '%s', 'UNREAD', NOW())"
+            .formatted(tenantId, userId, dedupKey);
     }
 
     private static String dedup(long tenantId, long actorId, String command, String requestId) {

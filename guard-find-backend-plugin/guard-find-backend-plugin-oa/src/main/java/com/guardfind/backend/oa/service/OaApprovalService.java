@@ -27,6 +27,7 @@ import com.guardfind.backend.oa.model.OaTaskTransferReq;
 import com.guardfind.backend.oa.model.OaTodoTaskResp;
 import com.guardfind.backend.oa.repository.OaApprovalRepository;
 import com.guardfind.backend.oa.repository.OaApprovalRepository.ApprovalApplication;
+import com.guardfind.backend.oa.repository.OaApprovalRepository.ApplicationBrief;
 import com.guardfind.backend.oa.repository.OaApprovalRepository.TodoApplication;
 import com.guardfind.backend.oa.repository.OaDelegateRepository;
 import com.guardfind.backend.oa.repository.OaDelegateRepository.Delegation;
@@ -79,6 +80,7 @@ public class OaApprovalService {
     private final OaDelegateRepository delegateRepository;
     private final OaStaffDirectory staffDirectory;
     private final OaApprovalEngine engine;
+    private final OaOutboxService outboxService;
     private final ObjectMapper objectMapper;
     private final TransactionTemplate transactionTemplate;
 
@@ -87,6 +89,7 @@ public class OaApprovalService {
                              OaDelegateRepository delegateRepository,
                              OaStaffDirectory staffDirectory,
                              OaApprovalEngine engine,
+                             OaOutboxService outboxService,
                              ObjectMapper objectMapper,
                              PlatformTransactionManager transactionManager) {
         this.approvalRepository = approvalRepository;
@@ -94,6 +97,7 @@ public class OaApprovalService {
         this.delegateRepository = delegateRepository;
         this.staffDirectory = staffDirectory;
         this.engine = engine;
+        this.outboxService = outboxService;
         this.objectMapper = objectMapper;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
@@ -198,6 +202,16 @@ public class OaApprovalService {
             approvalRepository.insertAudit(tenantId, context.application().id(), context.task()
                 .getProcessInstanceId(), context.task()
                     .getId(), COMMAND_APPROVE, userId, operatorName(tenantId, userId), originalAssignee, reason, requestId, writeJson(detail), now);
+            ApplicationBrief brief = approvalRepository.applicationBrief(tenantId, context.application().id());
+            notifyOutcome(tenantId, brief, ended
+                ? OaOutboxService.EVENT_APPLICATION_APPROVED
+                : null, "APPROVED", "申请已通过", "您的申请「" + titleOf(brief) + "」已审批通过", ended
+                    ? "APPROVED:" + context.application().id() + ":" + requestId
+                    : null);
+            if (!ended) {
+                notifyNewTasks(tenantId, brief, instanceId, before, "TODO", "待审批：", "已流转到", "待您审批");
+            }
+            notifyCancelled(tenantId, brief, cancelled, context.task().getId(), "会签已完成", "会签完成条件已满足，您无需再处理");
             return new OaApprovalActionResp(context.application().id(), status, taskId, false);
         });
     }
@@ -234,6 +248,11 @@ public class OaApprovalService {
             approvalRepository.insertAudit(tenantId, context.application().id(), context.task()
                 .getProcessInstanceId(), context.task()
                     .getId(), COMMAND_REJECT, userId, operatorName(tenantId, userId), originalAssignee, reason, requestId, writeJson(detail), now);
+            ApplicationBrief brief = approvalRepository.applicationBrief(tenantId, context.application().id());
+            notifyOutcome(tenantId, brief, OaOutboxService.EVENT_APPLICATION_REJECTED, "REJECTED", "申请被驳回", "您的申请「" + titleOf(brief) + "」被驳回：" + reason, "REJECTED:" + context
+                .application()
+                .id() + ":" + requestId);
+            notifyCancelled(tenantId, brief, cancelled, taskId, "审批已驳回", "驳回后流程已终止，您无需再处理");
             return new OaApprovalActionResp(context.application().id(), "REJECTED", taskId, false);
         });
     }
@@ -260,6 +279,13 @@ public class OaApprovalService {
             approvalRepository.insertAudit(tenantId, context.application().id(), context.task()
                 .getProcessInstanceId(), context.task()
                     .getId(), COMMAND_RETURN, userId, operatorName(tenantId, userId), originalAssignee, reason, requestId, writeJson(detail), now);
+            ApplicationBrief brief = approvalRepository.applicationBrief(tenantId, context.application().id());
+            engine.activeTasks(context.task().getProcessInstanceId(), Long.toString(tenantId))
+                .stream()
+                .filter(task -> task.getId().equals(targetTaskId))
+                .findFirst()
+                .ifPresent(task -> notifyTask(tenantId, brief, task, "RETURNED", "退回待处理", "「" + titleOf(brief) + "」已退回至「" + task
+                    .getName() + "」，待您重新处理", "ASSIGN:" + task.getId()));
             return new OaApprovalActionResp(context.application().id(), "RUNNING", taskId, false);
         });
     }
@@ -338,6 +364,10 @@ public class OaApprovalService {
             detail.put("applicationStatus", "RUNNING");
             approvalRepository.insertAudit(tenantId, application.id(), task.getProcessInstanceId(), task
                 .getId(), COMMAND_TRANSFER, userId, operatorName(tenantId, userId), originalAssignee, reason, requestId, writeJson(detail), now);
+            ApplicationBrief brief = approvalRepository.applicationBrief(tenantId, application.id());
+            notifyUsers(tenantId, brief, task, List
+                .of(targetUserId), "TRANSFERRED", "任务已转交", "「" + titleOf(brief) + "」的审批任务已转交给您", "TRANSFER:" + task
+                    .getId() + ":" + requestId);
             return new OaApprovalActionResp(application.id(), "RUNNING", taskId, false);
         });
     }
@@ -480,6 +510,97 @@ public class OaApprovalService {
         detail.put("cancelledTaskIds", cancelled.stream().map(Task::getId).toList());
         detail.put("cancelledAssignees", cancelled.stream().map(Task::getAssignee).filter(Objects::nonNull).toList());
         detail.put("cancelReason", reason);
+    }
+
+    private void notifyOutcome(long tenantId,
+                               ApplicationBrief brief,
+                               String eventType,
+                               String notificationType,
+                               String title,
+                               String content,
+                               String dedupKey) {
+        if (brief == null || eventType == null) {
+            return;
+        }
+        outboxService.recordNotification(tenantId, OaOutboxService.AGGREGATE_APPLICATION, Long.toString(brief
+            .id()), eventType, dedupKey, brief.id(), null, notificationType, title, content, List.of(brief
+                .applicantId()));
+    }
+
+    /**
+     * 只提醒本次动作后新产生的任务，避免重复通知仍在等待的审批人。
+     */
+    private void notifyNewTasks(long tenantId,
+                                ApplicationBrief brief,
+                                String instanceId,
+                                List<Task> before,
+                                String notificationType,
+                                String titlePrefix,
+                                String verb,
+                                String suffix) {
+        if (brief == null) {
+            return;
+        }
+        Set<String> existing = new LinkedHashSet<>();
+        for (Task task : before) {
+            existing.add(task.getId());
+        }
+        for (Task task : engine.activeTasks(instanceId, Long.toString(tenantId))) {
+            if (!existing.contains(task.getId())) {
+                notifyTask(tenantId, brief, task, notificationType, titlePrefix + brief.title(), "「" + brief
+                    .title() + "」" + verb + "「" + task.getName() + "」，" + suffix, "ASSIGN:" + task.getId());
+            }
+        }
+    }
+
+    private void notifyTask(long tenantId,
+                            ApplicationBrief brief,
+                            Task task,
+                            String notificationType,
+                            String title,
+                            String content,
+                            String dedupKey) {
+        notifyUsers(tenantId, brief, task, engine.recipientIds(task), notificationType, title, content, dedupKey);
+    }
+
+    private void notifyUsers(long tenantId,
+                             ApplicationBrief brief,
+                             Task task,
+                             List<Long> recipients,
+                             String notificationType,
+                             String title,
+                             String content,
+                             String dedupKey) {
+        if (brief == null || recipients == null || recipients.isEmpty()) {
+            return;
+        }
+        outboxService.recordNotification(tenantId, OaOutboxService.AGGREGATE_TASK, task
+            .getId(), OaOutboxService.EVENT_TASK_ASSIGNED, dedupKey, brief.id(), task
+                .getId(), notificationType, title, content, recipients);
+    }
+
+    private void notifyCancelled(long tenantId,
+                                 ApplicationBrief brief,
+                                 List<Task> cancelled,
+                                 String currentTaskId,
+                                 String title,
+                                 String content) {
+        if (brief == null) {
+            return;
+        }
+        for (Task task : cancelled) {
+            Long assignee = parseLong(task.getAssignee());
+            if (assignee == null) {
+                continue;
+            }
+            outboxService.recordNotification(tenantId, OaOutboxService.AGGREGATE_TASK, task
+                .getId(), OaOutboxService.EVENT_TASK_ASSIGNED, "CANCEL:" + task.getId() + ":" + currentTaskId, brief
+                    .id(), task.getId(), "CANCELLED", title, "「" + brief.title() + "」" + content, List.of(assignee));
+        }
+    }
+
+    private static String titleOf(ApplicationBrief brief) {
+        return brief == null ? "申请" : brief.title();
     }
 
     private static Long parseLong(String value) {

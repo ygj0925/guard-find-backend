@@ -95,3 +95,8 @@ databaseChangeLog:
       file: classpath:db/changelog/mysql/oa/oa_delegate_rule.sql
   - include:
       file: classpath:db/changelog/mysql/oa/oa_delegate_menu.sql
+  # OA outbox 去重、站内通知与运维权限
+  - include:
+      file: classpath:db/changelog/mysql/oa/oa_ops.sql
+  - include:
+      file: classpath:db/changelog/mysql/oa/oa_ops_menu.sql

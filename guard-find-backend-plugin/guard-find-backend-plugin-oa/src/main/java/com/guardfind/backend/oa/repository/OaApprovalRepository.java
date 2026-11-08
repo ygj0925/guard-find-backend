@@ -63,6 +63,34 @@ public class OaApprovalRepository {
         return rows.isEmpty() ? null : rows.get(0);
     }
 
+    public ApplicationBrief applicationBrief(long tenantId, long applicationId) {
+        List<ApplicationBrief> rows = jdbcTemplate.query("""
+            SELECT id, applicant_id, title, business_key, process_instance_id, status
+              FROM oa_application
+             WHERE tenant_id = ? AND id = ? AND deleted = 0
+            """, (rs, rowNum) -> new ApplicationBrief(rs.getLong("id"), rs.getLong("applicant_id"), rs
+            .getString("title"), rs.getString("business_key"), rs.getString("process_instance_id"), rs
+                .getString("status")), tenantId, applicationId);
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    public ApplicationBrief applicationBriefByInstanceId(long tenantId, String processInstanceId) {
+        List<ApplicationBrief> rows = jdbcTemplate.query("""
+            SELECT id, applicant_id, title, business_key, process_instance_id, status
+              FROM oa_application
+             WHERE tenant_id = ? AND process_instance_id = ? AND deleted = 0
+            """, (rs, rowNum) -> new ApplicationBrief(rs.getLong("id"), rs.getLong("applicant_id"), rs
+            .getString("title"), rs.getString("business_key"), rs.getString("process_instance_id"), rs
+                .getString("status")), tenantId, processInstanceId);
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    public List<Long> applicationTenants() {
+        return jdbcTemplate.queryForList("""
+            SELECT DISTINCT tenant_id FROM oa_application WHERE deleted = 0
+            """, Long.class);
+    }
+
     /**
      * 撤回前加行锁，避免与审批动作并发时读到已过期的“无审批动作”快照。
      */
@@ -232,6 +260,10 @@ public class OaApprovalRepository {
     }
 
     public record ApprovalApplication(long id, long applicantId, String status, String processInstanceId) {
+    }
+
+    public record ApplicationBrief(long id, long applicantId, String title, String businessKey,
+                                   String processInstanceId, String status) {
     }
 
     public record TodoApplication(long id, String businessKey, String title, String applicantName,
