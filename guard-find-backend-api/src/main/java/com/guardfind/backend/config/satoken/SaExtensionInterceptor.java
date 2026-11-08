@@ -49,6 +49,22 @@ public class SaExtensionInterceptor extends SaInterceptor {
     public boolean preHandle(HttpServletRequest request,
                              HttpServletResponse response,
                              Object handler) throws Exception {
+        // afterCompletion 只在 preHandle 返回 true 时执行；拒绝路径不清理会把上一个用户的上下文留在复用的工作线程上
+        UserContextHolder.clearContext();
+        boolean proceed = false;
+        try {
+            proceed = checkRequest(request, response, handler);
+            return proceed;
+        } finally {
+            if (!proceed) {
+                UserContextHolder.clearContext();
+            }
+        }
+    }
+
+    private boolean checkRequest(HttpServletRequest request,
+                                 HttpServletResponse response,
+                                 Object handler) throws Exception {
         boolean flag = super.preHandle(request, response, handler);
         if (!flag || !StpUtil.isLogin()) {
             return flag;
