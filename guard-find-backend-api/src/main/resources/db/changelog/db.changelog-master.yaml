@@ -90,3 +90,8 @@ databaseChangeLog:
   # OA 员工/岗位管理菜单、乐观锁版本
   - include:
       file: classpath:db/changelog/mysql/oa/oa_staff_manage.sql
+  # OA 限时代理规则与代理/离职转交权限
+  - include:
+      file: classpath:db/changelog/mysql/oa/oa_delegate_rule.sql
+  - include:
+      file: classpath:db/changelog/mysql/oa/oa_delegate_menu.sql

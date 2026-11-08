@@ -24,7 +24,9 @@ import com.guardfind.backend.oa.model.OaPositionCreateReq;
 import com.guardfind.backend.oa.model.OaPositionOptionResp;
 import com.guardfind.backend.oa.model.OaPositionResp;
 import com.guardfind.backend.oa.model.OaPositionUpdateReq;
+import com.guardfind.backend.oa.model.OaHandoverResp;
 import com.guardfind.backend.oa.repository.OaStaffRepository;
+import com.guardfind.backend.oa.staff.OaTaskHandover;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -43,7 +45,7 @@ import java.util.Set;
  *
  * <p>
  * 用户与部门沿用后台账号（sys_user），本服务只维护 OA 档案。员工更新带乐观锁并原子替换岗位；
- * 直属主管必须是在职员工且不能形成环路，离职员工不会自动转交存量待办。
+ * 直属主管必须是在职员工且不能形成环路，离职时优先自动把存量待办转交直属主管。
  * </p>
  */
 @Service
@@ -56,10 +58,14 @@ public class OaStaffService {
     private static final Set<String> POSITION_STATUSES = Set.of("ENABLED", "DISABLED");
 
     private final OaStaffRepository repository;
+    private final OaTaskHandover taskHandover;
     private final TransactionTemplate transactionTemplate;
 
-    public OaStaffService(OaStaffRepository repository, PlatformTransactionManager transactionManager) {
+    public OaStaffService(OaStaffRepository repository,
+                          OaTaskHandover taskHandover,
+                          PlatformTransactionManager transactionManager) {
         this.repository = repository;
+        this.taskHandover = taskHandover;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
 
@@ -126,8 +132,43 @@ public class OaStaffService {
                 throw new BusinessException("员工档案已被其他人修改，请刷新后重试");
             }
             repository.replacePositions(tenantId, employee.userId(), positionIds, operatorId, now);
+            if ("RESIGNED".equals(employmentStatus) && !"RESIGNED".equals(employee.employmentStatus())) {
+                autoHandover(tenantId, operatorId, employee);
+            }
             return detailEmployee(tenantId, id);
         });
+    }
+
+    /**
+     * 离职员工手工转交全部运行中待办；没有有效直属主管时由管理员指定接收人。
+     */
+    public OaHandoverResp handover(long tenantId, long operatorId, long employeeId, long targetUserId, String reason) {
+        OaEmployeeResp employee = repository.detailEmployee(tenantId, employeeId);
+        if (employee == null) {
+            throw new BusinessException("员工不存在");
+        }
+        if (employee.userId() == targetUserId) {
+            throw new BusinessException("不能转交给员工本人");
+        }
+        try {
+            int transferred = taskHandover.transferRunningTasks(tenantId, operatorId, employee
+                .userId(), targetUserId, normalizeReason(reason));
+            return new OaHandoverResp(transferred);
+        } catch (IllegalArgumentException e) {
+            throw new BusinessException(e.getMessage());
+        }
+    }
+
+    private void autoHandover(long tenantId, long operatorId, OaEmployeeResp employee) {
+        Long supervisorId = employee.supervisorId();
+        if (supervisorId == null || supervisorId == employee.userId()) {
+            return;
+        }
+        try {
+            taskHandover.transferRunningTasks(tenantId, operatorId, employee.userId(), supervisorId, "员工离职自动转交直属主管");
+        } catch (IllegalArgumentException ignored) {
+            // 主管也已离职等场景不阻塞离职办理，管理员可通过手工转交补做
+        }
     }
 
     public List<OaEmployeeOptionResp> employeeOptions(long tenantId, String keyword) {
@@ -233,6 +274,17 @@ public class OaStaffService {
             throw new BusinessException("岗位不存在、已停用或不属于当前租户");
         }
         return distinct;
+    }
+
+    private static String normalizeReason(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return "离职待办转交";
+        }
+        String reason = raw.trim();
+        if (reason.length() > 500) {
+            throw new BusinessException("转交原因不能超过 500 个字符");
+        }
+        return reason;
     }
 
     private static String normalizeEmployeeNo(String employeeNo) {

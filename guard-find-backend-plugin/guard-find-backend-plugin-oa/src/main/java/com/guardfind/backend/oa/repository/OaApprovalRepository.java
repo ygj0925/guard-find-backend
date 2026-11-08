@@ -36,8 +36,8 @@ import java.util.Map;
 @Repository
 public class OaApprovalRepository {
 
-    private static final String DONE_ACTION_FILTER = " AND au.action IN ('APPROVE', 'REJECT', 'RETURN')";
-    private static final String OWN_ACTION_FILTER = " AND action IN ('APPROVE', 'REJECT', 'RETURN')";
+    private static final String DONE_ACTION_FILTER = " AND au.action IN ('APPROVE', 'REJECT', 'RETURN', 'CLAIM', 'TRANSFER')";
+    private static final String OWN_ACTION_FILTER = " AND action IN ('APPROVE', 'REJECT', 'RETURN', 'CLAIM', 'TRANSFER')";
 
     private static final RowMapper<OaDoneRecordResp> DONE_MAPPER = (rs, rowNum) -> new OaDoneRecordResp(rs
         .getLong("application_id"), rs.getString("title"), rs.getString("business_key"), rs.getString("model_name"), rs

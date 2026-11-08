@@ -23,5 +23,20 @@ import java.time.LocalDateTime;
  */
 public record OaTodoTaskResp(long applicationId, String title, String businessKey, String modelName, String formName,
                              String applicantName, String applicantDeptName, String taskId, String taskName,
-                             LocalDateTime taskCreateTime, LocalDateTime submittedTime) {
+                             LocalDateTime taskCreateTime, LocalDateTime submittedTime, Long proxyForId,
+                             String proxyForName) {
+
+    public OaTodoTaskResp(long applicationId,
+                          String title,
+                          String businessKey,
+                          String modelName,
+                          String formName,
+                          String applicantName,
+                          String applicantDeptName,
+                          String taskId,
+                          String taskName,
+                          LocalDateTime taskCreateTime,
+                          LocalDateTime submittedTime) {
+        this(applicationId, title, businessKey, modelName, formName, applicantName, applicantDeptName, taskId, taskName, taskCreateTime, submittedTime, null, null);
+    }
 }

@@ -23,10 +23,12 @@ import com.guardfind.backend.oa.model.OaEmployeeCreateReq;
 import com.guardfind.backend.oa.model.OaEmployeeOptionResp;
 import com.guardfind.backend.oa.model.OaEmployeeResp;
 import com.guardfind.backend.oa.model.OaEmployeeUpdateReq;
+import com.guardfind.backend.oa.model.OaHandoverResp;
 import com.guardfind.backend.oa.model.OaPositionCreateReq;
 import com.guardfind.backend.oa.model.OaPositionOptionResp;
 import com.guardfind.backend.oa.model.OaPositionResp;
 import com.guardfind.backend.oa.model.OaPositionUpdateReq;
+import com.guardfind.backend.oa.model.OaResignHandoverReq;
 import com.guardfind.backend.oa.service.OaStaffService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -97,6 +99,13 @@ public class OaStaffController {
     @PutMapping("/employee/{id}")
     public OaEmployeeResp employeeUpdate(@PathVariable Long id, @Valid @RequestBody OaEmployeeUpdateReq req) {
         return service.updateEmployee(tenantId(), userId(), id, req);
+    }
+
+    @Operation(summary = "离职/调岗待办转交")
+    @SaCheckPermission("system:oa:employee:transfer")
+    @PostMapping("/employee/{id}/handover")
+    public OaHandoverResp employeeHandover(@PathVariable Long id, @Valid @RequestBody OaResignHandoverReq req) {
+        return service.handover(tenantId(), userId(), id, req.targetUserId(), req.reason());
     }
 
     @Operation(summary = "在职员工选项")

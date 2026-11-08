@@ -26,17 +26,24 @@ import com.guardfind.backend.oa.model.OaApprovalActionReq;
 import com.guardfind.backend.oa.model.OaApprovalActionResp;
 import com.guardfind.backend.oa.model.OaApprovalDetailResp;
 import com.guardfind.backend.oa.model.OaAssigneeBindingReq;
+import com.guardfind.backend.oa.model.OaDelegateRuleCreateReq;
+import com.guardfind.backend.oa.model.OaDelegateRuleResp;
 import com.guardfind.backend.oa.model.OaLaunchSubmitReq;
 import com.guardfind.backend.oa.model.OaLaunchSubmitResp;
+import com.guardfind.backend.oa.model.OaTaskTransferReq;
 import com.guardfind.backend.oa.repository.OaApprovalRepository;
 import com.guardfind.backend.oa.repository.OaAttachmentRepository;
+import com.guardfind.backend.oa.repository.OaDelegateRepository;
 import com.guardfind.backend.oa.repository.OaLaunchRepository;
 import com.guardfind.backend.oa.service.OaApprovalService;
 import com.guardfind.backend.oa.service.OaAttachmentService;
+import com.guardfind.backend.oa.service.OaDelegateService;
 import com.guardfind.backend.oa.service.OaLaunchService;
 import com.guardfind.backend.oa.staff.OaAssigneeResolver;
 import com.guardfind.backend.oa.staff.OaProcessLauncher;
 import com.guardfind.backend.oa.staff.OaStaffDirectory;
+import com.guardfind.backend.oa.staff.OaTaskHandover;
+import com.guardfind.backend.oa.staff.OaTaskHandoverService;
 import org.flowable.engine.HistoryService;
 import org.flowable.engine.RepositoryService;
 import org.flowable.engine.RuntimeService;
@@ -54,6 +61,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import top.continew.starter.core.exception.BusinessException;
 
 import javax.sql.DataSource;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -103,6 +111,21 @@ class OaApprovalServiceTest {
             <bpmn:sequenceFlow id="flow4" sourceRef="finance" targetRef="join"/>
             <bpmn:parallelGateway id="join"/>
             <bpmn:sequenceFlow id="flow5" sourceRef="join" targetRef="end"/>
+            <bpmn:endEvent id="end"/>
+          </bpmn:process>
+        </bpmn:definitions>
+        """;
+
+    private static final String CANDIDATE_BPMN = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                          xmlns:flowable="http://flowable.org/bpmn"
+                          targetNamespace="http://guardfind.com/oa/bpmn">
+          <bpmn:process id="oaApproval" name="候选审批" isExecutable="true">
+            <bpmn:startEvent id="start"/>
+            <bpmn:sequenceFlow id="flow1" sourceRef="start" targetRef="manager"/>
+            <bpmn:userTask id="manager" name="主管审批" flowable:candidateUsers="${manager}"/>
+            <bpmn:sequenceFlow id="flow2" sourceRef="manager" targetRef="end"/>
             <bpmn:endEvent id="end"/>
           </bpmn:process>
         </bpmn:definitions>
@@ -304,6 +327,166 @@ class OaApprovalServiceTest {
         });
     }
 
+    @Test
+    void claimsCandidateTaskIdempotentlyAndRejectsSecondClaimer() {
+        runner().run(context -> {
+            Fixture fixture = fixture(context, CANDIDATE_BPMN);
+            fixture.submitCandidate();
+            String taskId = fixture.managerTaskId();
+
+            assertThat(fixture.approvalService.todo(TENANT, 102, null, 1, 10).items()).hasSize(1);
+            assertThat(fixture.approvalService.todo(TENANT, 103, null, 1, 10).items()).hasSize(1);
+
+            OaApprovalActionResp claimed = fixture.approvalService.claim(TENANT, 102, taskId, action("claim-1"));
+            assertThat(claimed.status()).isEqualTo("RUNNING");
+            assertThat(fixture.approvalService.todo(TENANT, 103, null, 1, 10).items()).isEmpty();
+
+            OaApprovalActionResp replay = fixture.approvalService.claim(TENANT, 102, taskId, action("claim-1"));
+            assertThat(replay.replayed()).isTrue();
+            assertThat(fixture.jdbc
+                .queryForObject("SELECT COUNT(*) FROM oa_approval_audit WHERE action = 'CLAIM'", Integer.class))
+                .isEqualTo(1);
+            assertThat(fixture.taskService.createTaskQuery().taskId(taskId).singleResult().getAssignee())
+                .isEqualTo("102");
+
+            assertThatThrownBy(() -> fixture.approvalService.claim(TENANT, 103, taskId, action("claim-2")))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("无权领取");
+            assertThatThrownBy(() -> fixture.approvalService.approve(TENANT, 103, taskId, action("approve-1")))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("无权处理");
+        });
+    }
+
+    @Test
+    void transferRequiresClaimAndMovesTaskToActiveEmployee() {
+        runner().run(context -> {
+            Fixture fixture = fixture(context, CANDIDATE_BPMN);
+            fixture.submitCandidate();
+            String taskId = fixture.managerTaskId();
+
+            assertThatThrownBy(() -> fixture.approvalService
+                .transfer(TENANT, 102, taskId, new OaTaskTransferReq("transfer-1", 103L, null)))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("请先领取任务后再转交");
+
+            fixture.approvalService.claim(TENANT, 102, taskId, action("claim-1"));
+            assertThatThrownBy(() -> fixture.approvalService
+                .transfer(TENANT, 102, taskId, new OaTaskTransferReq("transfer-2", 999L, null)))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("不是本租户在职员工");
+            assertThatThrownBy(() -> fixture.approvalService
+                .transfer(TENANT, 102, taskId, new OaTaskTransferReq("transfer-3", 102L, null)))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("不能转交给自己");
+
+            OaApprovalActionResp result = fixture.approvalService
+                .transfer(TENANT, 102, taskId, new OaTaskTransferReq("transfer-4", 103L, "交给同事"));
+            assertThat(result.status()).isEqualTo("RUNNING");
+            assertThat(fixture.approvalService.todo(TENANT, 102, null, 1, 10).items()).isEmpty();
+            assertThat(fixture.approvalService.todo(TENANT, 103, null, 1, 10).items()).hasSize(1);
+            assertThat(fixture.taskService.createTaskQuery().taskId(taskId).singleResult().getAssignee())
+                .isEqualTo("103");
+            assertThat(fixture.jdbc
+                .queryForObject("SELECT original_assignee_id FROM oa_approval_audit WHERE action = 'TRANSFER'", Long.class))
+                .isEqualTo(102L);
+        });
+    }
+
+    @Test
+    void delegateSeesAndActsOnBehalfOfDelegator() {
+        runner().run(context -> {
+            Fixture fixture = fixture(context, BPMN);
+            fixture.submit();
+            LocalDateTime now = LocalDateTime.now();
+            OaDelegateRuleResp rule = fixture.delegateService.create(TENANT, 102, new OaDelegateRuleCreateReq(103L, now
+                .minusHours(1), now.plusHours(2), "出差"));
+            assertThat(rule.delegateName()).isEqualTo("Carol");
+
+            var proxyTodo = fixture.approvalService.todo(TENANT, 103, null, 1, 10).items();
+            assertThat(proxyTodo).hasSize(1);
+            assertThat(proxyTodo.get(0).proxyForId()).isEqualTo(102L);
+            assertThat(proxyTodo.get(0).proxyForName()).isEqualTo("Bob");
+
+            String taskId = proxyTodo.get(0).taskId();
+            OaApprovalDetailResp detail = fixture.approvalService.detail(TENANT, 103, taskId);
+            assertThat(detail.pending()).isTrue();
+            assertThat(detail.proxyForId()).isEqualTo(102L);
+            assertThatThrownBy(() -> fixture.approvalService.claim(TENANT, 103, taskId, action("claim-1")))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("无权领取");
+
+            fixture.approvalService.approve(TENANT, 103, taskId, action("approve-proxy"));
+            assertThat(fixture.approvalService.todo(TENANT, 102, null, 1, 10).items()).isEmpty();
+            assertThat(fixture.approvalService.done(TENANT, 103, null, 1, 10).total()).isEqualTo(1);
+            assertThat(fixture.jdbc
+                .queryForObject("SELECT operator_id FROM oa_approval_audit WHERE action = 'APPROVE'", Long.class))
+                .isEqualTo(103L);
+            assertThat(fixture.jdbc
+                .queryForObject("SELECT original_assignee_id FROM oa_approval_audit WHERE action = 'APPROVE'", Long.class))
+                .isEqualTo(102L);
+            assertThat(fixture.jdbc
+                .queryForObject("SELECT detail_json FROM oa_approval_audit WHERE action = 'APPROVE'", String.class))
+                .contains("\"proxyForId\":102");
+        });
+    }
+
+    @Test
+    void delegateRulesRejectOverlapAndCycle() {
+        runner().run(context -> {
+            Fixture fixture = fixture(context, BPMN);
+            LocalDateTime base = LocalDateTime.now();
+            OaDelegateRuleResp first = fixture.delegateService
+                .create(TENANT, 101, new OaDelegateRuleCreateReq(102L, base.plusHours(1), base.plusHours(2), null));
+            assertThat(first.status()).isEqualTo("ENABLED");
+
+            assertThatThrownBy(() -> fixture.delegateService.create(TENANT, 101, new OaDelegateRuleCreateReq(102L, base
+                .plusMinutes(90), base.plusHours(3), null))).isInstanceOf(BusinessException.class)
+                .hasMessageContaining("已有代理规则");
+            assertThatThrownBy(() -> fixture.delegateService.create(TENANT, 102, new OaDelegateRuleCreateReq(101L, base
+                .plusHours(1), base.plusHours(2), null))).isInstanceOf(BusinessException.class)
+                .hasMessageContaining("环路");
+            assertThatThrownBy(() -> fixture.delegateService.create(TENANT, 101, new OaDelegateRuleCreateReq(101L, base
+                .plusHours(1), base.plusHours(2), null))).isInstanceOf(BusinessException.class)
+                .hasMessageContaining("代理给自己");
+            assertThatThrownBy(() -> fixture.delegateService
+                .create(TENANT, 101, new OaDelegateRuleCreateReq(103L, base, base.plusDays(91), null)))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("90 天");
+
+            assertThat(fixture.delegateService.list(TENANT, 101)).hasSize(1);
+            assertThatThrownBy(() -> fixture.delegateService.delete(TENANT, 102, first.id()))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("无权操作");
+            fixture.delegateService.delete(TENANT, 101, first.id());
+            assertThat(fixture.delegateService.list(TENANT, 101)).isEmpty();
+        });
+    }
+
+    @Test
+    void handoverMovesCandidateTasksAndClearsOriginalIdentity() {
+        runner().run(context -> {
+            Fixture fixture = fixture(context, CANDIDATE_BPMN);
+            fixture.submitCandidate();
+            String taskId = fixture.managerTaskId();
+
+            assertThat(fixture.handover.transferRunningTasks(TENANT, 7, 102, 103, "离职转交")).isEqualTo(1);
+            assertThat(fixture.approvalService.todo(TENANT, 102, null, 1, 10).items()).isEmpty();
+            assertThat(fixture.approvalService.todo(TENANT, 103, null, 1, 10).items()).hasSize(1);
+            assertThat(fixture.taskService.createTaskQuery().taskId(taskId).singleResult().getAssignee())
+                .isEqualTo("103");
+            assertThat(fixture.jdbc
+                .queryForObject("SELECT original_assignee_id FROM oa_approval_audit WHERE action = 'TRANSFER'", Long.class))
+                .isEqualTo(102L);
+            assertThat(fixture.jdbc
+                .queryForObject("SELECT request_id FROM oa_approval_audit WHERE action = 'TRANSFER'", String.class))
+                .startsWith("HANDOVER-");
+            assertThatThrownBy(() -> fixture.handover.transferRunningTasks(TENANT, 7, 103, 999, null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("不是本租户在职员工");
+        });
+    }
+
     private static OaApprovalActionReq action(String requestId) {
         return new OaApprovalActionReq(requestId, null);
     }
@@ -344,8 +527,13 @@ class OaApprovalServiceTest {
         OaAttachmentService attachmentService = new OaAttachmentService(new OaAttachmentRepository(jdbc), approvalEngine);
         OaLaunchService launchService = new OaLaunchService(launchRepository, new OaBpmnValidator(List
             .of()), new OaFormValueValidator(), attachmentService, launcher, new ObjectMapper(), transactionManager);
-        OaApprovalService approvalService = new OaApprovalService(new OaApprovalRepository(jdbc), launchRepository, approvalEngine, new ObjectMapper(), transactionManager);
-        return new Fixture(jdbc, launchService, approvalService, runtimeService, taskService);
+        StubStaffDirectory directory = new StubStaffDirectory();
+        OaDelegateRepository delegateRepository = new OaDelegateRepository(jdbc);
+        OaApprovalRepository approvalRepository = new OaApprovalRepository(jdbc);
+        OaApprovalService approvalService = new OaApprovalService(approvalRepository, launchRepository, delegateRepository, directory, approvalEngine, new ObjectMapper(), transactionManager);
+        OaDelegateService delegateService = new OaDelegateService(delegateRepository, directory);
+        OaTaskHandover handover = new OaTaskHandoverService(approvalEngine, approvalRepository, directory, new ObjectMapper());
+        return new Fixture(jdbc, launchService, approvalService, delegateService, handover, runtimeService, taskService);
     }
 
     private static void seedAccounts(JdbcTemplate jdbc) {
@@ -440,6 +628,15 @@ class OaApprovalServiceTest {
               CONSTRAINT uk_audit_request UNIQUE (tenant_id, request_id)
             )
             """);
+        jdbc.execute("""
+            CREATE TABLE oa_delegate_rule (
+              id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY, tenant_id BIGINT NOT NULL,
+              delegator_id BIGINT NOT NULL, delegate_id BIGINT NOT NULL, start_time TIMESTAMP NOT NULL,
+              end_time TIMESTAMP NOT NULL, status VARCHAR(20) NOT NULL DEFAULT 'ENABLED', reason VARCHAR(500),
+              create_user BIGINT NOT NULL, create_time TIMESTAMP NOT NULL, update_user BIGINT,
+              update_time TIMESTAMP, deleted BIGINT NOT NULL DEFAULT 0
+            )
+            """);
     }
 
     /** 员工目录桩：101/102/103 在职。 */
@@ -462,12 +659,12 @@ class OaApprovalServiceTest {
 
         @Override
         public boolean enabledPosition(long tenantId, String code) {
-            return false;
+            return tenantId == TENANT && "APPROVER".equals(code);
         }
 
         @Override
         public List<Long> activeUsersByPosition(long tenantId, String code) {
-            return List.of();
+            return "APPROVER".equals(code) ? List.of(102L, 103L) : List.of();
         }
 
         @Override
@@ -477,7 +674,8 @@ class OaApprovalServiceTest {
     }
 
     private record Fixture(JdbcTemplate jdbc, OaLaunchService launchService, OaApprovalService approvalService,
-                           RuntimeService runtimeService, TaskService taskService) {
+                           OaDelegateService delegateService, OaTaskHandover handover, RuntimeService runtimeService,
+                           TaskService taskService) {
 
         private long submit() {
             return submit("req-submit-1");
@@ -488,6 +686,22 @@ class OaApprovalServiceTest {
                 .of("reason", "出差"), List
                     .of(new OaAssigneeBindingReq("manager", "EMPLOYEE", "102"), new OaAssigneeBindingReq("finance", "EMPLOYEE", "103"))));
             return resp.applicationId();
+        }
+
+        private long submitCandidate() {
+            OaLaunchSubmitResp resp = launchService
+                .submit(TENANT, 101, 10, new OaLaunchSubmitReq("req-submit-candidate", "候选审批", Map
+                    .of("reason", "出差"), List.of(new OaAssigneeBindingReq("manager", "POSITION", "APPROVER"))));
+            return resp.applicationId();
+        }
+
+        private String managerTaskId() {
+            Task task = taskService.createTaskQuery()
+                .taskTenantId(Long.toString(TENANT))
+                .taskDefinitionKey("manager")
+                .singleResult();
+            assertThat(task).isNotNull();
+            return task.getId();
         }
 
         private String taskId(long assignee) {

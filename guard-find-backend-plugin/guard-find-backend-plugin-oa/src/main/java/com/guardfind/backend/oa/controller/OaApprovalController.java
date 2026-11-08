@@ -21,14 +21,19 @@ import com.guardfind.backend.common.context.UserContextHolder;
 import com.guardfind.backend.oa.model.OaApprovalActionReq;
 import com.guardfind.backend.oa.model.OaApprovalActionResp;
 import com.guardfind.backend.oa.model.OaApprovalDetailResp;
+import com.guardfind.backend.oa.model.OaDelegateRuleCreateReq;
+import com.guardfind.backend.oa.model.OaDelegateRuleResp;
 import com.guardfind.backend.oa.model.OaDoneRecordResp;
+import com.guardfind.backend.oa.model.OaTaskTransferReq;
 import com.guardfind.backend.oa.model.OaTodoTaskResp;
 import com.guardfind.backend.oa.service.OaApprovalService;
+import com.guardfind.backend.oa.service.OaDelegateService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -39,6 +44,8 @@ import org.springframework.web.bind.annotation.RestController;
 import top.continew.starter.extension.crud.model.query.PageQuery;
 import top.continew.starter.extension.crud.model.resp.PageResp;
 import top.continew.starter.log.annotation.Log;
+
+import java.util.List;
 
 /**
  * OA 审批中心 API（前台）：只看当前处理人的待办与已办，动作按任务身份授权。
@@ -52,6 +59,7 @@ import top.continew.starter.log.annotation.Log;
 public class OaApprovalController {
 
     private final OaApprovalService service;
+    private final OaDelegateService delegateService;
 
     @Operation(summary = "待办分页")
     @SaCheckPermission("system:oa:approval:list")
@@ -98,6 +106,41 @@ public class OaApprovalController {
     public OaApprovalActionResp returnToPrevious(@PathVariable String taskId,
                                                  @Valid @RequestBody OaApprovalActionReq req) {
         return service.returnToPrevious(tenantId(), userId(), taskId, req);
+    }
+
+    @Operation(summary = "候选领取")
+    @SaCheckPermission("system:oa:approval:action")
+    @PostMapping("/task/{taskId}/claim")
+    public OaApprovalActionResp claim(@PathVariable String taskId, @Valid @RequestBody OaApprovalActionReq req) {
+        return service.claim(tenantId(), userId(), taskId, req);
+    }
+
+    @Operation(summary = "转交审批任务")
+    @SaCheckPermission("system:oa:approval:action")
+    @PostMapping("/task/{taskId}/transfer")
+    public OaApprovalActionResp transfer(@PathVariable String taskId, @Valid @RequestBody OaTaskTransferReq req) {
+        return service.transfer(tenantId(), userId(), taskId, req);
+    }
+
+    @Operation(summary = "我的代理规则")
+    @SaCheckPermission("system:oa:delegate:manage")
+    @GetMapping("/delegate")
+    public List<OaDelegateRuleResp> delegateRules() {
+        return delegateService.list(tenantId(), userId());
+    }
+
+    @Operation(summary = "新建代理规则")
+    @SaCheckPermission("system:oa:delegate:manage")
+    @PostMapping("/delegate")
+    public OaDelegateRuleResp createDelegateRule(@Valid @RequestBody OaDelegateRuleCreateReq req) {
+        return delegateService.create(tenantId(), userId(), req);
+    }
+
+    @Operation(summary = "取消代理规则")
+    @SaCheckPermission("system:oa:delegate:manage")
+    @DeleteMapping("/delegate/{id}")
+    public void deleteDelegateRule(@PathVariable Long id) {
+        delegateService.delete(tenantId(), userId(), id);
     }
 
     @Operation(summary = "发起人撤回")

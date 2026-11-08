@@ -102,6 +102,50 @@ public class OaApprovalEngine {
         }
     }
 
+    /**
+     * 候选领取：未领取时归当前用户；已被本人领取时幂等；被他人领取时拒绝。
+     */
+    public void claim(Task task, String userId) {
+        if (task.getAssignee() != null && !task.getAssignee().equals(userId)) {
+            throw new IllegalStateException("任务已被其他处理人领取");
+        }
+        if (task.getAssignee() == null) {
+            taskService.claim(task.getId(), userId);
+        }
+    }
+
+    /**
+     * 转交任务：清理全部候选身份链接后写入唯一处理人，避免原候选人继续看到任务。
+     */
+    public void reassign(Task task, String targetUserId) {
+        removeCandidateLinks(task);
+        taskService.setAssignee(task.getId(), targetUserId);
+    }
+
+    public void removeCandidateLinks(Task task) {
+        for (org.flowable.identitylink.api.IdentityLink link : taskService.getIdentityLinksForTask(task.getId())) {
+            if (link.getUserId() != null) {
+                taskService.deleteCandidateUser(task.getId(), link.getUserId());
+            } else if (link.getGroupId() != null) {
+                taskService.deleteCandidateGroup(task.getId(), link.getGroupId());
+            }
+        }
+    }
+
+    /**
+     * 员工名下全部运行中任务（含候选），供离职转交使用。
+     */
+    public List<Task> runningTasksOfUser(String tenantId, String userId, int limit) {
+        requireText(tenantId, "租户不能为空");
+        requireText(userId, "用户不能为空");
+        return taskService.createTaskQuery()
+            .taskTenantId(tenantId)
+            .taskCandidateOrAssigned(userId)
+            .orderByTaskCreateTime()
+            .asc()
+            .listPage(0, Math.max(1, limit));
+    }
+
     public void complete(String taskId) {
         taskService.complete(taskId);
     }

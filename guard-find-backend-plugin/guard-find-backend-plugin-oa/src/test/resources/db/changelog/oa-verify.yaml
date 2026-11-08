@@ -25,3 +25,5 @@ databaseChangeLog:
       file: db/changelog/mysql/oa/oa_request_dedup.sql
   - include:
       file: db/changelog/mysql/oa/oa_staff.sql
+  - include:
+      file: db/changelog/mysql/oa/oa_delegate_rule.sql

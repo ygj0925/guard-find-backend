@@ -232,7 +232,12 @@ class OaStaffServiceTest {
         createTables(jdbc);
         seedUsers(jdbc);
         OaStaffRepository repository = new OaStaffRepository(jdbc);
-        OaStaffService service = new OaStaffService(repository, context.getBean(PlatformTransactionManager.class));
+        OaStaffService service = new OaStaffService(repository, (tenantId,
+                                                                 operatorId,
+                                                                 fromUserId,
+                                                                 targetUserId,
+                                                                 reason) -> 0, context
+                                                                     .getBean(PlatformTransactionManager.class));
         return new Fixture(service, jdbc);
     }
 

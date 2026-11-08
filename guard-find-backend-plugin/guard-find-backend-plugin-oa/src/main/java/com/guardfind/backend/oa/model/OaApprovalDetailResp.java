@@ -20,5 +20,15 @@ package com.guardfind.backend.oa.model;
  * 审批任务详情。pending 为 false 时表示任务已结束，仅允许查看历史。
  */
 public record OaApprovalDetailResp(String taskId, String taskName, String taskDefinitionKey, String assignee,
-                                   boolean pending, OaApplicationDetailResp application) {
+                                   boolean pending, OaApplicationDetailResp application, Long proxyForId,
+                                   String proxyForName) {
+
+    public OaApprovalDetailResp(String taskId,
+                                String taskName,
+                                String taskDefinitionKey,
+                                String assignee,
+                                boolean pending,
+                                OaApplicationDetailResp application) {
+        this(taskId, taskName, taskDefinitionKey, assignee, pending, application, null, null);
+    }
 }

@@ -23,12 +23,16 @@ import com.guardfind.backend.oa.model.OaApprovalActionReq;
 import com.guardfind.backend.oa.model.OaApprovalActionResp;
 import com.guardfind.backend.oa.model.OaApprovalDetailResp;
 import com.guardfind.backend.oa.model.OaDoneRecordResp;
+import com.guardfind.backend.oa.model.OaTaskTransferReq;
 import com.guardfind.backend.oa.model.OaTodoTaskResp;
 import com.guardfind.backend.oa.repository.OaApprovalRepository;
 import com.guardfind.backend.oa.repository.OaApprovalRepository.ApprovalApplication;
 import com.guardfind.backend.oa.repository.OaApprovalRepository.TodoApplication;
+import com.guardfind.backend.oa.repository.OaDelegateRepository;
+import com.guardfind.backend.oa.repository.OaDelegateRepository.Delegation;
 import com.guardfind.backend.oa.repository.OaLaunchRepository;
 import com.guardfind.backend.oa.repository.OaLaunchRepository.DedupRecord;
+import com.guardfind.backend.oa.staff.OaStaffDirectory;
 import org.flowable.common.engine.api.FlowableException;
 import org.flowable.task.api.Task;
 import org.springframework.dao.DuplicateKeyException;
@@ -63,6 +67,8 @@ public class OaApprovalService {
     public static final String COMMAND_REJECT = "REJECT";
     public static final String COMMAND_RETURN = "RETURN";
     public static final String COMMAND_WITHDRAW = "WITHDRAW";
+    public static final String COMMAND_CLAIM = "CLAIM";
+    public static final String COMMAND_TRANSFER = "TRANSFER";
 
     private static final int DEDUP_TTL_HOURS = 24;
     private static final int TODO_SCAN_LIMIT = 200;
@@ -70,33 +76,50 @@ public class OaApprovalService {
 
     private final OaApprovalRepository approvalRepository;
     private final OaLaunchRepository launchRepository;
+    private final OaDelegateRepository delegateRepository;
+    private final OaStaffDirectory staffDirectory;
     private final OaApprovalEngine engine;
     private final ObjectMapper objectMapper;
     private final TransactionTemplate transactionTemplate;
 
     public OaApprovalService(OaApprovalRepository approvalRepository,
                              OaLaunchRepository launchRepository,
+                             OaDelegateRepository delegateRepository,
+                             OaStaffDirectory staffDirectory,
                              OaApprovalEngine engine,
                              ObjectMapper objectMapper,
                              PlatformTransactionManager transactionManager) {
         this.approvalRepository = approvalRepository;
         this.launchRepository = launchRepository;
+        this.delegateRepository = delegateRepository;
+        this.staffDirectory = staffDirectory;
         this.engine = engine;
         this.objectMapper = objectMapper;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
 
     public ApprovalPage<OaTodoTaskResp> todo(long tenantId, long userId, String keyword, int page, int size) {
-        List<Task> tasks = engine.todoTasks(Long.toString(tenantId), Long.toString(userId), TODO_SCAN_LIMIT);
+        Map<String, TaskAccess> accesses = new LinkedHashMap<>();
+        for (Task task : engine.todoTasks(Long.toString(tenantId), Long.toString(userId), TODO_SCAN_LIMIT)) {
+            accesses.put(task.getId(), new TaskAccess(task, null, null));
+        }
+        for (Delegation delegation : activeDelegations(tenantId, userId)) {
+            for (Task task : engine.todoTasks(Long.toString(tenantId), Long.toString(delegation
+                .delegatorId()), TODO_SCAN_LIMIT)) {
+                accesses.putIfAbsent(task.getId(), new TaskAccess(task, delegation.delegatorId(), delegation
+                    .delegatorName()));
+            }
+        }
         Set<String> instanceIds = new LinkedHashSet<>();
-        for (Task task : tasks) {
-            if (task.getProcessInstanceId() != null) {
-                instanceIds.add(task.getProcessInstanceId());
+        for (TaskAccess access : accesses.values()) {
+            if (access.task().getProcessInstanceId() != null) {
+                instanceIds.add(access.task().getProcessInstanceId());
             }
         }
         Map<String, TodoApplication> applications = approvalRepository.todoApplications(tenantId, instanceIds);
         List<OaTodoTaskResp> items = new ArrayList<>();
-        for (Task task : tasks) {
+        for (TaskAccess access : accesses.values()) {
+            Task task = access.task();
             TodoApplication application = applications.get(task.getProcessInstanceId());
             if (application == null) {
                 continue;
@@ -106,7 +129,8 @@ public class OaApprovalService {
             }
             items.add(new OaTodoTaskResp(application.id(), application.title(), application.businessKey(), application
                 .modelName(), application.formName(), application.applicantName(), application.applicantDeptName(), task
-                    .getId(), task.getName(), localTime(task.getCreateTime()), application.submittedTime()));
+                    .getId(), task.getName(), localTime(task.getCreateTime()), application.submittedTime(), access
+                        .proxyForId(), access.proxyForName()));
         }
         return paginate(items, page, size);
     }
@@ -120,15 +144,16 @@ public class OaApprovalService {
     }
 
     public OaApprovalDetailResp detail(long tenantId, long userId, String taskId) {
-        Task task = engine.authorizedTask(taskId, Long.toString(tenantId), Long.toString(userId));
-        if (task != null) {
+        TaskAccess access = resolveAccess(tenantId, userId, taskId);
+        if (access != null) {
+            Task task = access.task();
             ApprovalApplication application = requireApplication(tenantId, task.getProcessInstanceId());
             OaApplicationDetailResp detail = launchRepository.applicationDetailById(tenantId, application.id());
             if (detail == null) {
                 throw new BusinessException("申请不存在");
             }
             return new OaApprovalDetailResp(task.getId(), task.getName(), task.getTaskDefinitionKey(), task
-                .getAssignee(), true, detail);
+                .getAssignee(), true, detail, access.proxyForId(), access.proxyForName());
         }
         Long applicationId = approvalRepository.auditApplicationId(tenantId, taskId, userId);
         if (applicationId == null) {
@@ -147,8 +172,9 @@ public class OaApprovalService {
         return command(tenantId, userId, COMMAND_APPROVE, requestId, () -> {
             ActionContext context = prepareAction(tenantId, userId, taskId);
             touch(tenantId, userId, context.application().id());
+            Long originalAssignee = originalAssignee(context);
             try {
-                engine.claimIfUnassigned(context.task(), Long.toString(userId));
+                claimForAction(context, userId);
                 engine.complete(context.task().getId());
             } catch (FlowableException | IllegalStateException e) {
                 throw new BusinessException("任务状态已变化，请刷新待办后重试");
@@ -162,9 +188,10 @@ public class OaApprovalService {
             Map<String, Object> detail = actionDetail(requestId, context.task());
             detail.put("processEnded", ended);
             detail.put("applicationStatus", status);
+            putProxy(detail, context);
             approvalRepository.insertAudit(tenantId, context.application().id(), context.task()
                 .getProcessInstanceId(), context.task()
-                    .getId(), COMMAND_APPROVE, userId, operatorName(tenantId, userId), null, reason, requestId, writeJson(detail), now);
+                    .getId(), COMMAND_APPROVE, userId, operatorName(tenantId, userId), originalAssignee, reason, requestId, writeJson(detail), now);
             return new OaApprovalActionResp(context.application().id(), status, taskId, false);
         });
     }
@@ -175,8 +202,9 @@ public class OaApprovalService {
         return command(tenantId, userId, COMMAND_REJECT, requestId, () -> {
             ActionContext context = prepareAction(tenantId, userId, taskId);
             touch(tenantId, userId, context.application().id());
+            Long originalAssignee = originalAssignee(context);
             try {
-                engine.claimIfUnassigned(context.task(), Long.toString(userId));
+                claimForAction(context, userId);
                 engine.deleteInstance(context.task().getProcessInstanceId(), Long
                     .toString(tenantId), "REJECT:" + reason);
             } catch (FlowableException | IllegalStateException e) {
@@ -187,9 +215,10 @@ public class OaApprovalService {
             Map<String, Object> detail = actionDetail(requestId, context.task());
             detail.put("processEnded", true);
             detail.put("applicationStatus", "REJECTED");
+            putProxy(detail, context);
             approvalRepository.insertAudit(tenantId, context.application().id(), context.task()
                 .getProcessInstanceId(), context.task()
-                    .getId(), COMMAND_REJECT, userId, operatorName(tenantId, userId), null, reason, requestId, writeJson(detail), now);
+                    .getId(), COMMAND_REJECT, userId, operatorName(tenantId, userId), originalAssignee, reason, requestId, writeJson(detail), now);
             return new OaApprovalActionResp(context.application().id(), "REJECTED", taskId, false);
         });
     }
@@ -200,9 +229,10 @@ public class OaApprovalService {
         return command(tenantId, userId, COMMAND_RETURN, requestId, () -> {
             ActionContext context = prepareAction(tenantId, userId, taskId);
             touch(tenantId, userId, context.application().id());
+            Long originalAssignee = originalAssignee(context);
             String targetTaskId;
             try {
-                engine.claimIfUnassigned(context.task(), Long.toString(userId));
+                claimForAction(context, userId);
                 targetTaskId = engine.returnToPreviousUserTask(context.task(), Long.toString(tenantId));
             } catch (FlowableException | IllegalStateException e) {
                 throw new BusinessException(e.getMessage());
@@ -211,10 +241,89 @@ public class OaApprovalService {
             Map<String, Object> detail = actionDetail(requestId, context.task());
             detail.put("targetTaskId", targetTaskId);
             detail.put("applicationStatus", "RUNNING");
+            putProxy(detail, context);
             approvalRepository.insertAudit(tenantId, context.application().id(), context.task()
                 .getProcessInstanceId(), context.task()
-                    .getId(), COMMAND_RETURN, userId, operatorName(tenantId, userId), null, reason, requestId, writeJson(detail), now);
+                    .getId(), COMMAND_RETURN, userId, operatorName(tenantId, userId), originalAssignee, reason, requestId, writeJson(detail), now);
             return new OaApprovalActionResp(context.application().id(), "RUNNING", taskId, false);
+        });
+    }
+
+    /**
+     * 候选领取：候选人或已领取人本人可领取，重复领取幂等。
+     */
+    public OaApprovalActionResp claim(long tenantId, long userId, String taskId, OaApprovalActionReq req) {
+        String requestId = requireRequestId(req);
+        String reason = optionalReason(req.reason());
+        return command(tenantId, userId, COMMAND_CLAIM, requestId, () -> {
+            Task task = engine.authorizedTask(taskId, Long.toString(tenantId), Long.toString(userId));
+            if (task == null) {
+                throw new BusinessException("任务不存在或无权领取");
+            }
+            ApprovalApplication application = requireApplication(tenantId, task.getProcessInstanceId());
+            if (!"RUNNING".equals(application.status())) {
+                throw new BusinessException("申请已结束，无法领取");
+            }
+            try {
+                engine.claim(task, Long.toString(userId));
+            } catch (IllegalStateException e) {
+                throw new BusinessException(e.getMessage());
+            }
+            touch(tenantId, userId, application.id());
+            LocalDateTime now = LocalDateTime.now();
+            Map<String, Object> detail = actionDetail(requestId, task);
+            detail.put("applicationStatus", "RUNNING");
+            approvalRepository.insertAudit(tenantId, application.id(), task.getProcessInstanceId(), task
+                .getId(), COMMAND_CLAIM, userId, operatorName(tenantId, userId), null, reason, requestId, writeJson(detail), now);
+            return new OaApprovalActionResp(application.id(), "RUNNING", taskId, false);
+        });
+    }
+
+    /**
+     * 转交：仅已领取的处理人可转交给本租户其他在职员工，原处理人从任务身份中移除。
+     */
+    public OaApprovalActionResp transfer(long tenantId, long userId, String taskId, OaTaskTransferReq req) {
+        if (req == null) {
+            throw new BusinessException("转交参数不能为空");
+        }
+        String requestId = requireRequestId(req.requestId());
+        String reason = optionalReason(req.reason());
+        Long targetUserId = req.targetUserId();
+        if (targetUserId == null || targetUserId <= 0) {
+            throw new BusinessException("目标处理人无效");
+        }
+        if (targetUserId == userId) {
+            throw new BusinessException("不能转交给自己");
+        }
+        return command(tenantId, userId, COMMAND_TRANSFER, requestId, () -> {
+            Task task = engine.authorizedTask(taskId, Long.toString(tenantId), Long.toString(userId));
+            if (task == null) {
+                throw new BusinessException("任务不存在或无权转交");
+            }
+            ApprovalApplication application = requireApplication(tenantId, task.getProcessInstanceId());
+            if (!"RUNNING".equals(application.status())) {
+                throw new BusinessException("申请已结束，无法转交");
+            }
+            if (task.getAssignee() == null || !task.getAssignee().equals(Long.toString(userId))) {
+                throw new BusinessException("请先领取任务后再转交");
+            }
+            if (!staffDirectory.activeEmployee(tenantId, targetUserId)) {
+                throw new BusinessException("目标处理人不是本租户在职员工");
+            }
+            Long originalAssignee = parseLong(task.getAssignee());
+            touch(tenantId, userId, application.id());
+            try {
+                engine.reassign(task, Long.toString(targetUserId));
+            } catch (FlowableException | IllegalStateException e) {
+                throw new BusinessException("任务状态已变化，请刷新待办后重试");
+            }
+            LocalDateTime now = LocalDateTime.now();
+            Map<String, Object> detail = actionDetail(requestId, task);
+            detail.put("targetUserId", targetUserId);
+            detail.put("applicationStatus", "RUNNING");
+            approvalRepository.insertAudit(tenantId, application.id(), task.getProcessInstanceId(), task
+                .getId(), COMMAND_TRANSFER, userId, operatorName(tenantId, userId), originalAssignee, reason, requestId, writeJson(detail), now);
+            return new OaApprovalActionResp(application.id(), "RUNNING", taskId, false);
         });
     }
 
@@ -276,15 +385,62 @@ public class OaApprovalService {
     }
 
     private ActionContext prepareAction(long tenantId, long userId, String taskId) {
-        Task task = engine.authorizedTask(taskId, Long.toString(tenantId), Long.toString(userId));
-        if (task == null) {
+        TaskAccess access = resolveAccess(tenantId, userId, taskId);
+        if (access == null) {
             throw new BusinessException("任务不存在或无权处理");
         }
-        ApprovalApplication application = requireApplication(tenantId, task.getProcessInstanceId());
+        ApprovalApplication application = requireApplication(tenantId, access.task().getProcessInstanceId());
         if (!"RUNNING".equals(application.status())) {
             throw new BusinessException("申请已结束，无法继续审批");
         }
-        return new ActionContext(task, application);
+        return new ActionContext(access.task(), application, access.proxyForId());
+    }
+
+    private TaskAccess resolveAccess(long tenantId, long userId, String taskId) {
+        Task direct = engine.authorizedTask(taskId, Long.toString(tenantId), Long.toString(userId));
+        if (direct != null) {
+            return new TaskAccess(direct, null, null);
+        }
+        for (Delegation delegation : activeDelegations(tenantId, userId)) {
+            Task proxied = engine.authorizedTask(taskId, Long.toString(tenantId), Long.toString(delegation
+                .delegatorId()));
+            if (proxied != null) {
+                return new TaskAccess(proxied, delegation.delegatorId(), delegation.delegatorName());
+            }
+        }
+        return null;
+    }
+
+    private List<Delegation> activeDelegations(long tenantId, long userId) {
+        return delegateRepository.activeDelegations(tenantId, userId, LocalDateTime.now());
+    }
+
+    private void claimForAction(ActionContext context, long userId) {
+        if (context.proxyForId() == null) {
+            engine.claimIfUnassigned(context.task(), Long.toString(userId));
+        }
+    }
+
+    private static Long originalAssignee(ActionContext context) {
+        Long assignee = parseLong(context.task().getAssignee());
+        return assignee == null ? context.proxyForId() : assignee;
+    }
+
+    private static void putProxy(Map<String, Object> detail, ActionContext context) {
+        if (context.proxyForId() != null) {
+            detail.put("proxyForId", context.proxyForId());
+        }
+    }
+
+    private static Long parseLong(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return Long.parseLong(value);
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     private ApprovalApplication requireApplication(long tenantId, String processInstanceId) {
@@ -336,10 +492,14 @@ public class OaApprovalService {
     }
 
     private static String requireRequestId(OaApprovalActionReq req) {
-        if (req == null || req.requestId() == null || req.requestId().isBlank()) {
+        return requireRequestId(req == null ? null : req.requestId());
+    }
+
+    private static String requireRequestId(String raw) {
+        if (raw == null || raw.isBlank()) {
             throw new BusinessException("请求 ID 不能为空");
         }
-        String requestId = req.requestId().trim();
+        String requestId = raw.trim();
         if (requestId.length() > 64) {
             throw new BusinessException("请求 ID 不能超过 64 个字符");
         }
@@ -395,7 +555,10 @@ public class OaApprovalService {
         }
     }
 
-    private record ActionContext(Task task, ApprovalApplication application) {
+    private record TaskAccess(Task task, Long proxyForId, String proxyForName) {
+    }
+
+    private record ActionContext(Task task, ApprovalApplication application, Long proxyForId) {
 
         private ActionContext {
             Objects.requireNonNull(task);
