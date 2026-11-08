@@ -21,6 +21,7 @@ import cn.dev33.satoken.interceptor.SaInterceptor;
 import cn.dev33.satoken.stp.StpUtil;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import java.nio.charset.StandardCharsets;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.lang.Nullable;
@@ -63,6 +64,8 @@ public class SaExtensionInterceptor extends SaInterceptor {
             Long tenantId = TenantContextHolder.getTenantId();
             if (!userTenantId.equals(tenantId)) {
                 R r = R.fail(String.valueOf(HttpStatus.FORBIDDEN.value()), "您当前没有访问该租户的权限");
+                // 容器默认按 ISO-8859-1 输出，中文提示会变成问号
+                response.setCharacterEncoding(StandardCharsets.UTF_8.name());
                 ServletUtils.writeJSON(response, JSONUtils.toJsonStr(r));
                 return false;
             }
