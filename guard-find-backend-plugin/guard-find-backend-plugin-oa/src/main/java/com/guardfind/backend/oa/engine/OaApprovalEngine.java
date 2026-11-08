@@ -67,6 +67,20 @@ public class OaApprovalEngine {
             .singleResult();
     }
 
+    /**
+     * 当前用户是否为流程实例的待处理人（含候选）。
+     */
+    public boolean hasTaskAccess(String processInstanceId, String tenantId, String userId) {
+        if (processInstanceId == null || processInstanceId.isBlank() || tenantId == null || userId == null) {
+            return false;
+        }
+        return taskService.createTaskQuery()
+            .processInstanceId(processInstanceId)
+            .taskTenantId(tenantId)
+            .taskCandidateOrAssigned(userId)
+            .count() > 0;
+    }
+
     public List<Task> todoTasks(String tenantId, String userId, int limit) {
         requireText(tenantId, "租户不能为空");
         requireText(userId, "用户不能为空");

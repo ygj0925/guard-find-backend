@@ -74,6 +74,7 @@ public class OaLaunchService {
     private final OaLaunchRepository repository;
     private final OaBpmnValidator bpmnValidator;
     private final OaFormValueValidator formValueValidator;
+    private final OaAttachmentService attachmentService;
     private final OaProcessLauncher launcher;
     private final ObjectMapper objectMapper;
     private final TransactionTemplate transactionTemplate;
@@ -81,12 +82,14 @@ public class OaLaunchService {
     public OaLaunchService(OaLaunchRepository repository,
                            OaBpmnValidator bpmnValidator,
                            OaFormValueValidator formValueValidator,
+                           OaAttachmentService attachmentService,
                            OaProcessLauncher launcher,
                            ObjectMapper objectMapper,
                            PlatformTransactionManager transactionManager) {
         this.repository = repository;
         this.bpmnValidator = bpmnValidator;
         this.formValueValidator = formValueValidator;
+        this.attachmentService = attachmentService;
         this.launcher = launcher;
         this.objectMapper = objectMapper;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
@@ -164,12 +167,14 @@ public class OaLaunchService {
         if (values.normalized().containsKey(OaAssigneeContext.FORM_DATA_VARIABLE)) {
             throw new BusinessException("表单字段不能使用保留名称 " + OaAssigneeContext.FORM_DATA_VARIABLE);
         }
+        OaAttachmentService.PreparedForm prepared = attachmentService.prepare(tenantId, userId, values.normalized());
+        Map<String, Object> normalized = prepared.values();
 
         Set<String> personFields = personFields(release.schemaJson());
         Map<String, OaAssigneeSpec> bindings = resolveBindings(validation, req.assignees(), personFields);
 
-        Map<String, Object> variables = new LinkedHashMap<>(values.normalized());
-        variables.put(OaAssigneeContext.FORM_DATA_VARIABLE, Map.copyOf(values.normalized()));
+        Map<String, Object> variables = new LinkedHashMap<>(normalized);
+        variables.put(OaAssigneeContext.FORM_DATA_VARIABLE, Map.copyOf(normalized));
         String title = title(req.title(), release.modelName());
         String businessKey = businessKey(release.releaseId(), now);
 
@@ -184,8 +189,10 @@ public class OaLaunchService {
 
         long applicationId = repository.insertApplication(tenantId, release
             .modelKey(), businessKey, title, userId, profile.name(), profile.deptId(), profile.deptName(), release
-                .releaseId(), release.formVersionId(), release.formVersion(), writeJson(values.normalized()), instance
+                .releaseId(), release.formVersionId(), release.formVersion(), writeJson(normalized), instance
                     .getId(), now);
+        attachmentService.link(tenantId, applicationId, release.modelKey(), businessKey, userId, prepared
+            .attachments(), now);
         repository.insertAudit(tenantId, applicationId, instance.getId(), "SUBMIT", userId, profile
             .name(), requestId, auditDetail(requestId, release, bindings), now);
 

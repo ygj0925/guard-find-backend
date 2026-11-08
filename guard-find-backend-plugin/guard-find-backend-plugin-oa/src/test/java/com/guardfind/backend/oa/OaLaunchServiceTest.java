@@ -19,18 +19,22 @@ package com.guardfind.backend.oa;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.guardfind.backend.oa.bpmn.OaBpmnValidator;
 import com.guardfind.backend.oa.config.OaFlowableConfiguration;
+import com.guardfind.backend.oa.engine.OaApprovalEngine;
 import com.guardfind.backend.oa.engine.OaEngineTemplate;
 import com.guardfind.backend.oa.form.OaFormValueValidator;
 import com.guardfind.backend.oa.model.OaAssigneeBindingReq;
 import com.guardfind.backend.oa.model.OaLaunchDetailResp;
 import com.guardfind.backend.oa.model.OaLaunchSubmitReq;
 import com.guardfind.backend.oa.model.OaLaunchSubmitResp;
+import com.guardfind.backend.oa.repository.OaAttachmentRepository;
 import com.guardfind.backend.oa.repository.OaLaunchRepository;
 import com.guardfind.backend.oa.service.OaApplicationService;
+import com.guardfind.backend.oa.service.OaAttachmentService;
 import com.guardfind.backend.oa.service.OaLaunchService;
 import com.guardfind.backend.oa.staff.OaAssigneeResolver;
 import com.guardfind.backend.oa.staff.OaProcessLauncher;
 import com.guardfind.backend.oa.staff.OaStaffDirectory;
+import org.flowable.engine.HistoryService;
 import org.flowable.engine.RepositoryService;
 import org.flowable.engine.RuntimeService;
 import org.flowable.engine.TaskService;
@@ -83,7 +87,8 @@ class OaLaunchServiceTest {
     private static final String SCHEMA = """
         {"version":1,"fields":[
           {"id":"reason","key":"reason","label":"事由","type":"text","required":true},
-          {"id":"approver","key":"approver","label":"审批人","type":"person","required":false}
+          {"id":"approver","key":"approver","label":"审批人","type":"person","required":false},
+          {"id":"proof","key":"proof","label":"附件","type":"attachment","required":false}
         ]}
         """;
 
@@ -199,6 +204,132 @@ class OaLaunchServiceTest {
         });
     }
 
+    @Test
+    void submitsAttachmentAndLinksItToApplication() {
+        runner().run(context -> {
+            Fixture fixture = fixture(context, BPMN);
+            seedFile(fixture.jdbc, 501, TENANT, 101, "stored.pdf", "报告.pdf", 1024);
+            OaLaunchSubmitReq req = new OaLaunchSubmitReq("req-attach", null, Map.of("reason", "事假", "approver", List
+                .of(102), "proof", List.of(Map.of("uid", "u1", "name", "客户端名.pdf", "fileId", 501))), List.of());
+            OaLaunchSubmitResp resp = fixture.launchService.submit(TENANT, 101, 10, req);
+
+            Map<String, Object> link = fixture.jdbc
+                .queryForMap("SELECT * FROM oa_attachment_link WHERE tenant_id = ? AND application_id = ?", TENANT, resp
+                    .applicationId());
+            assertThat(((Number)link.get("file_id")).longValue()).isEqualTo(501L);
+            assertThat(link.get("file_name")).isEqualTo("报告.pdf");
+            assertThat(link.get("scan_status")).isEqualTo("SKIPPED");
+            assertThat(((Number)link.get("available")).intValue()).isEqualTo(1);
+            assertThat(link.get("business_type")).isEqualTo("leave");
+
+            var detail = fixture.applicationService.detail(TENANT, 101, resp.applicationId());
+            var stored = (List<?>)detail.formData().get("proof");
+            assertThat(stored).hasSize(1);
+            assertThat(((Map<?, ?>)stored.get(0)).get("fileId")).isEqualTo(501);
+            assertThat(((Map<?, ?>)stored.get(0)).get("name")).isEqualTo("报告.pdf");
+        });
+    }
+
+    @Test
+    void rejectsAttachmentUploadedByAnotherUserWithoutSideEffects() {
+        runner().run(context -> {
+            Fixture fixture = fixture(context, BPMN);
+            seedFile(fixture.jdbc, 502, TENANT, 103, "other.pdf", "他人附件.pdf", 1024);
+            OaLaunchSubmitReq req = new OaLaunchSubmitReq("req-foreign", null, Map.of("reason", "事假", "approver", List
+                .of(102), "proof", List.of(Map.of("fileId", 502))), List.of());
+
+            assertThatThrownBy(() -> fixture.launchService.submit(TENANT, 101, 10, req))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("附件不存在或无权使用");
+            assertThat(fixture.runtimeService.createProcessInstanceQuery().count()).isZero();
+            assertThat(fixture.jdbc.queryForObject("SELECT COUNT(*) FROM oa_application", Integer.class)).isZero();
+            assertThat(fixture.jdbc.queryForObject("SELECT COUNT(*) FROM oa_request_dedup", Integer.class)).isZero();
+            assertThat(fixture.jdbc.queryForObject("SELECT COUNT(*) FROM oa_attachment_link", Integer.class)).isZero();
+        });
+    }
+
+    @Test
+    void rejectsAttachmentAlreadyLinkedOrNotUploaded() {
+        runner().run(context -> {
+            Fixture fixture = fixture(context, BPMN);
+            seedFile(fixture.jdbc, 503, TENANT, 101, "used.pdf", "已用.pdf", 1024);
+            fixture.jdbc
+                .update("""
+                    INSERT INTO oa_attachment_link
+                      (tenant_id, application_id, business_type, business_key, file_id, file_name, file_size,
+                       content_type, category, scan_status, available, create_user, create_time, deleted)
+                    VALUES (101, 999, 'leave', 'OA-OLD', 503, '已用.pdf', 1024, 'application/pdf', 'FORM', 'SKIPPED', 1, 101, CURRENT_TIMESTAMP, 0)
+                    """);
+            OaLaunchSubmitReq linked = new OaLaunchSubmitReq("req-linked", null, Map.of("reason", "事假", "approver", List
+                .of(102), "proof", List.of(Map.of("fileId", 503))), List.of());
+            assertThatThrownBy(() -> fixture.launchService.submit(TENANT, 101, 10, linked))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("附件已被其他申请使用");
+
+            OaLaunchSubmitReq legacy = new OaLaunchSubmitReq("req-legacy", null, Map.of("reason", "事假", "approver", List
+                .of(102), "proof", List.of("报告.pdf")), List.of());
+            assertThatThrownBy(() -> fixture.launchService.submit(TENANT, 101, 10, legacy))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("附件未完成上传");
+            assertThat(fixture.jdbc.queryForObject("SELECT COUNT(*) FROM oa_attachment_link", Integer.class))
+                .isEqualTo(1);
+        });
+    }
+
+    @Test
+    void downloadIsLimitedToApplicationParticipants() {
+        runner().run(context -> {
+            Fixture fixture = fixture(context, BPMN);
+            seedFile(fixture.jdbc, 501, TENANT, 101, "stored.pdf", "报告.pdf", 1024);
+            OaLaunchSubmitReq req = new OaLaunchSubmitReq("req-download", null, Map.of("reason", "事假", "approver", List
+                .of(102), "proof", List.of(Map.of("fileId", 501))), List.of());
+            OaLaunchSubmitResp resp = fixture.launchService.submit(TENANT, 101, 10, req);
+
+            OaAttachmentService.DownloadAttachment applicant = fixture.attachmentService
+                .authorizeDownload(TENANT, 101, 501);
+            assertThat(applicant.fileName()).isEqualTo("报告.pdf");
+            assertThat(applicant.fileInfo().getPlatform()).isEqualTo("local");
+            assertThat(applicant.fileInfo().getPath()).isEqualTo("2026/11/08/");
+            assertThat(fixture.attachmentService.authorizeDownload(TENANT, 102, 501)).isNotNull();
+
+            fixture.jdbc.update("""
+                INSERT INTO oa_approval_audit
+                  (tenant_id, application_id, process_instance_id, task_id, action, operator_id, operator_name,
+                   request_id, detail_json, create_time)
+                VALUES (101, ?, ?, NULL, 'APPROVE', 104, '历史审批人', 'req-history', '{}', CURRENT_TIMESTAMP)
+                """, resp.applicationId(), resp.processInstanceId());
+            assertThat(fixture.attachmentService.authorizeDownload(TENANT, 104, 501)).isNotNull();
+
+            assertThatThrownBy(() -> fixture.attachmentService.authorizeDownload(TENANT, 103, 501))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("附件不存在或无权访问");
+            assertThatThrownBy(() -> fixture.attachmentService.authorizeDownload(202, 101, 501))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("附件不存在或无权访问");
+
+            fixture.jdbc.update("UPDATE oa_attachment_link SET available = 0 WHERE tenant_id = 101 AND file_id = 501");
+            assertThatThrownBy(() -> fixture.attachmentService.authorizeDownload(TENANT, 101, 501))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("附件不存在或无权访问");
+        });
+    }
+
+    private static void seedFile(JdbcTemplate jdbc,
+                                 long id,
+                                 long tenantId,
+                                 long uploaderId,
+                                 String name,
+                                 String originalName,
+                                 long size) {
+        jdbc.update("MERGE INTO sys_storage KEY (id) VALUES (1, 'local', 0)");
+        jdbc.update("""
+            INSERT INTO sys_file
+              (id, tenant_id, name, original_name, size, parent_path, path, extension, content_type,
+               type, storage_id, create_user, deleted)
+            VALUES (?, ?, ?, ?, ?, '/2026/11/08', ?, 'pdf', 'application/pdf', 1, 1, ?, 0)
+            """, id, tenantId, name, originalName, size, "/2026/11/08/" + name, uploaderId);
+    }
+
     private ApplicationContextRunner runner() {
         String url = "jdbc:h2:mem:oa-launch-" + DB_SEQ.incrementAndGet() + ";DB_CLOSE_DELAY=-1";
         return new ApplicationContextRunner().withConfiguration(AutoConfigurations
@@ -228,12 +359,15 @@ class OaLaunchServiceTest {
         OaEngineTemplate engineTemplate = new OaEngineTemplate(context.getBean(RuntimeService.class), context
             .getBean(TaskService.class));
         OaProcessLauncher launcher = new OaProcessLauncher(engineTemplate, new OaAssigneeResolver(new StubStaffDirectory()));
+        OaApprovalEngine approvalEngine = new OaApprovalEngine(context.getBean(RuntimeService.class), context
+            .getBean(TaskService.class), context.getBean(HistoryService.class), repositoryService);
+        OaAttachmentService attachmentService = new OaAttachmentService(new OaAttachmentRepository(jdbc), approvalEngine);
         OaLaunchService launchService = new OaLaunchService(repository, new OaBpmnValidator(List
-            .of()), new OaFormValueValidator(), launcher, new ObjectMapper(), context
+            .of()), new OaFormValueValidator(), attachmentService, launcher, new ObjectMapper(), context
                 .getBean(PlatformTransactionManager.class));
         OaApplicationService applicationService = new OaApplicationService(repository);
-        return new Fixture(jdbc, launchService, applicationService, context.getBean(RuntimeService.class), context
-            .getBean(TaskService.class));
+        return new Fixture(jdbc, launchService, applicationService, attachmentService, context
+            .getBean(RuntimeService.class), context.getBean(TaskService.class));
     }
 
     private static void seedAccounts(JdbcTemplate jdbc) {
@@ -335,6 +469,27 @@ class OaLaunchServiceTest {
               detail_json CLOB, create_time TIMESTAMP NOT NULL
             )
             """);
+        jdbc.execute("CREATE TABLE sys_storage (id BIGINT PRIMARY KEY, code VARCHAR(30) NOT NULL, deleted BIGINT NOT NULL DEFAULT 0)");
+        jdbc.execute("""
+            CREATE TABLE sys_file (
+              id BIGINT PRIMARY KEY, tenant_id BIGINT NOT NULL, name VARCHAR(255) NOT NULL,
+              original_name VARCHAR(255) NOT NULL, size BIGINT, parent_path VARCHAR(512) NOT NULL DEFAULT '/',
+              path VARCHAR(512) NOT NULL, extension VARCHAR(32), content_type VARCHAR(255),
+              type INT NOT NULL DEFAULT 1, storage_id BIGINT NOT NULL, create_user BIGINT NOT NULL,
+              deleted BIGINT NOT NULL DEFAULT 0
+            )
+            """);
+        jdbc.execute("""
+            CREATE TABLE oa_attachment_link (
+              id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY, tenant_id BIGINT NOT NULL,
+              application_id BIGINT, business_type VARCHAR(64), business_key VARCHAR(128),
+              file_id BIGINT NOT NULL, file_name VARCHAR(255), file_size BIGINT, content_type VARCHAR(100),
+              category VARCHAR(32) DEFAULT 'FORM', scan_status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+              available TINYINT NOT NULL DEFAULT 0, create_user BIGINT NOT NULL, create_time TIMESTAMP NOT NULL,
+              update_user BIGINT, update_time TIMESTAMP, deleted BIGINT NOT NULL DEFAULT 0,
+              CONSTRAINT uk_attachment_file UNIQUE (tenant_id, file_id, deleted)
+            )
+            """);
     }
 
     /** 员工目录桩：101/102/103 在职，研发部负责人与直属主管均为 102。 */
@@ -372,6 +527,7 @@ class OaLaunchServiceTest {
     }
 
     private record Fixture(JdbcTemplate jdbc, OaLaunchService launchService, OaApplicationService applicationService,
-                           RuntimeService runtimeService, TaskService taskService) {
+                           OaAttachmentService attachmentService, RuntimeService runtimeService,
+                           TaskService taskService) {
     }
 }

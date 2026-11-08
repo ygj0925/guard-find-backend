@@ -84,3 +84,6 @@ databaseChangeLog:
   # OA 审批中心菜单与动作权限
   - include:
       file: classpath:db/changelog/mysql/oa/oa_approval_menu.sql
+  # OA 附件下载权限与上传权限授予
+  - include:
+      file: classpath:db/changelog/mysql/oa/oa_attachment_menu.sql

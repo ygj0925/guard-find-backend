@@ -25,8 +25,10 @@ import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
@@ -196,32 +198,50 @@ public class OaFormValueValidator {
             throw new IllegalArgumentException("附件不能超过 " + MAX_ATTACHMENTS + " 个");
         }
         List<Object> files = new ArrayList<>();
+        Set<Long> fileIds = new LinkedHashSet<>();
         for (Object item : items) {
-            if (item instanceof CharSequence text) {
-                files.add(text.toString());
-                continue;
+            if (item instanceof CharSequence) {
+                throw new IllegalArgumentException("附件未完成上传");
             }
-            if (item instanceof Map<?, ?> map) {
-                Map<String, Object> file = new LinkedHashMap<>();
-                copyIfPresent(map, file, "uid");
-                copyIfPresent(map, file, "name");
-                copyIfPresent(map, file, "url");
-                if (file.isEmpty()) {
-                    throw new IllegalArgumentException("附件格式非法");
-                }
-                files.add(file);
-                continue;
+            if (!(item instanceof Map<?, ?> map)) {
+                throw new IllegalArgumentException("附件格式非法");
             }
-            throw new IllegalArgumentException("附件格式非法");
+            long fileId = attachmentFileId(map.get("fileId"));
+            if (!fileIds.add(fileId)) {
+                throw new IllegalArgumentException("同一附件不能重复上传");
+            }
+            Map<String, Object> file = new LinkedHashMap<>();
+            Object uid = map.get("uid");
+            if (uid instanceof CharSequence text) {
+                file.put("uid", text.toString());
+            }
+            Object name = map.get("name");
+            if (name instanceof CharSequence text) {
+                file.put("name", text.toString());
+            }
+            file.put("fileId", fileId);
+            files.add(Map.copyOf(file));
         }
         return List.copyOf(files);
     }
 
-    private static void copyIfPresent(Map<?, ?> source, Map<String, Object> target, String key) {
-        Object value = source.get(key);
-        if (value instanceof CharSequence text) {
-            target.put(key, text.toString());
+    private static long attachmentFileId(Object raw) {
+        if (raw instanceof Number number) {
+            long value = number.longValue();
+            if (value > 0 && number.doubleValue() == (double)value) {
+                return value;
+            }
+        } else if (raw instanceof CharSequence text) {
+            try {
+                long value = Long.parseLong(text.toString().trim());
+                if (value > 0) {
+                    return value;
+                }
+            } catch (NumberFormatException ignored) {
+                // 统一在下方报错
+            }
         }
+        throw new IllegalArgumentException("附件未完成上传");
     }
 
     private static List<Object> items(Object raw, String message) {

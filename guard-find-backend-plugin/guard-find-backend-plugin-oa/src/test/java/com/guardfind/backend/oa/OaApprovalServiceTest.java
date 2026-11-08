@@ -29,8 +29,10 @@ import com.guardfind.backend.oa.model.OaAssigneeBindingReq;
 import com.guardfind.backend.oa.model.OaLaunchSubmitReq;
 import com.guardfind.backend.oa.model.OaLaunchSubmitResp;
 import com.guardfind.backend.oa.repository.OaApprovalRepository;
+import com.guardfind.backend.oa.repository.OaAttachmentRepository;
 import com.guardfind.backend.oa.repository.OaLaunchRepository;
 import com.guardfind.backend.oa.service.OaApprovalService;
+import com.guardfind.backend.oa.service.OaAttachmentService;
 import com.guardfind.backend.oa.service.OaLaunchService;
 import com.guardfind.backend.oa.staff.OaAssigneeResolver;
 import com.guardfind.backend.oa.staff.OaProcessLauncher;
@@ -338,9 +340,10 @@ class OaApprovalServiceTest {
         OaEngineTemplate engineTemplate = new OaEngineTemplate(runtimeService, taskService);
         OaProcessLauncher launcher = new OaProcessLauncher(engineTemplate, new OaAssigneeResolver(new StubStaffDirectory()));
         PlatformTransactionManager transactionManager = context.getBean(PlatformTransactionManager.class);
-        OaLaunchService launchService = new OaLaunchService(launchRepository, new OaBpmnValidator(List
-            .of()), new OaFormValueValidator(), launcher, new ObjectMapper(), transactionManager);
         OaApprovalEngine approvalEngine = new OaApprovalEngine(runtimeService, taskService, historyService, repositoryService);
+        OaAttachmentService attachmentService = new OaAttachmentService(new OaAttachmentRepository(jdbc), approvalEngine);
+        OaLaunchService launchService = new OaLaunchService(launchRepository, new OaBpmnValidator(List
+            .of()), new OaFormValueValidator(), attachmentService, launcher, new ObjectMapper(), transactionManager);
         OaApprovalService approvalService = new OaApprovalService(new OaApprovalRepository(jdbc), launchRepository, approvalEngine, new ObjectMapper(), transactionManager);
         return new Fixture(jdbc, launchService, approvalService, runtimeService, taskService);
     }
