@@ -228,7 +228,8 @@ public class OaLaunchService {
         outboxService.recordNotification(tenantId, OaOutboxService.AGGREGATE_APPLICATION, Long
             .toString(applicationId), OaOutboxService.EVENT_APPLICATION_SUBMITTED, "SUBMIT:" + requestId, applicationId, null, "TODO", "待审批：" + title, "「" + release
                 .modelName() + "」已提交，等待您审批", recipients);
-        ccService.record(tenantId, applicationId, instance.getId(), ccReceivers, requestId, profile.name(), title, now);
+        ccService.record(tenantId, applicationId, instance.getId(), ccReceivers, userId, requestId, profile
+            .name(), title, now);
 
         OaLaunchSubmitResp resp = new OaLaunchSubmitResp(applicationId, businessKey, instance.getId(), false);
         repository.markDedupSucceeded(tenantId, userId, COMMAND_SUBMIT, requestId, writeJson(resp));

@@ -30,6 +30,7 @@ import com.guardfind.backend.oa.model.OaDelegateRuleCreateReq;
 import com.guardfind.backend.oa.model.OaDelegateRuleResp;
 import com.guardfind.backend.oa.model.OaLaunchSubmitReq;
 import com.guardfind.backend.oa.model.OaLaunchSubmitResp;
+import com.guardfind.backend.oa.model.OaTaskCcReq;
 import com.guardfind.backend.oa.model.OaTaskTransferReq;
 import com.guardfind.backend.oa.repository.OaApprovalRepository;
 import com.guardfind.backend.oa.repository.OaAttachmentRepository;
@@ -649,6 +650,85 @@ class OaApprovalServiceTest {
         });
     }
 
+    @Test
+    void approverAddsCcAndOnlyAdderCanRevoke() {
+        runner().run(context -> {
+            Fixture fixture = fixture(context, BPMN);
+            fixture.jdbc
+                .update("INSERT INTO sys_user (id, tenant_id, username, nickname, dept_id, status, deleted) VALUES (104, 101, 'dave', 'Dave', 20, 1, 0)");
+            for (long userId : List.of(101L, 102L, 103L, 104L)) {
+                fixture.jdbc
+                    .update("INSERT INTO oa_employee (id, tenant_id, user_id, employment_status, deleted) VALUES (?, 101, ?, 'ACTIVE', 0)", userId, userId);
+            }
+            long applicationId = fixture.submit();
+            String managerTask = fixture.taskId(102);
+            OaCcRepository ccRepository = new OaCcRepository(fixture.jdbc);
+            OaAttachmentRepository attachmentRepository = new OaAttachmentRepository(fixture.jdbc);
+
+            assertThatThrownBy(() -> fixture.approvalService.addCc(TENANT, 103, managerTask, cc("cc-wrong", 104L)))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("无权处理");
+
+            OaApprovalActionResp added = fixture.approvalService
+                .addCc(TENANT, 102, managerTask, cc("cc-1", 104L, 101L, 102L));
+            assertThat(added.status()).isEqualTo("RUNNING");
+            assertThat(fixture.jdbc
+                .queryForMap("SELECT receiver_id, cc_by, source_task_id, status FROM oa_cc_receipt WHERE application_id = ?", applicationId))
+                .containsEntry("RECEIVER_ID", 104L)
+                .containsEntry("CC_BY", 102L)
+                .containsEntry("SOURCE_TASK_ID", managerTask)
+                .containsEntry("STATUS", "UNREAD");
+            assertThat(fixture.approvalService.addCc(TENANT, 102, managerTask, cc("cc-1", 104L)).replayed()).isTrue();
+            assertThat(fixture.jdbc
+                .queryForObject("SELECT COUNT(*) FROM oa_approval_audit WHERE action = 'ADD_CC'", Integer.class))
+                .isEqualTo(1);
+            assertThat(fixture.jdbc
+                .queryForObject("SELECT COUNT(*) FROM oa_outbox WHERE event_type = 'APPLICATION_CC' AND dedup_key = 'CC_ADD:cc-1' AND payload LIKE '%104%'", Integer.class))
+                .isEqualTo(1);
+            assertThat(ccRepository.isReceiver(TENANT, applicationId, 104)).isTrue();
+            assertThat(attachmentRepository.isCcReceiver(TENANT, applicationId, 104)).isTrue();
+            assertThatThrownBy(() -> fixture.approvalService.addCc(TENANT, 102, managerTask, cc("cc-2", 104L)))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("已在抄送名单中");
+
+            assertThatThrownBy(() -> fixture.approvalService
+                .revokeCc(TENANT, 101, applicationId, 104, action("revoke-by-applicant")))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("只能撤销自己发起的抄送");
+            fixture.approvalService.revokeCc(TENANT, 102, applicationId, 104, action("revoke-1"));
+            assertThat(ccRepository.isReceiver(TENANT, applicationId, 104)).isFalse();
+            assertThat(attachmentRepository.isCcReceiver(TENANT, applicationId, 104)).isFalse();
+            assertThat(ccRepository.count(TENANT, 104, null, null)).isZero();
+            assertThat(fixture.jdbc
+                .queryForObject("SELECT revoke_by FROM oa_cc_receipt WHERE application_id = ?", Long.class, applicationId))
+                .isEqualTo(102L);
+            assertThatThrownBy(() -> fixture.approvalService
+                .revokeCc(TENANT, 102, applicationId, 104, action("revoke-2"))).isInstanceOf(BusinessException.class)
+                .hasMessageContaining("不存在或已撤销");
+
+            fixture.approvalService.addCc(TENANT, 102, managerTask, cc("cc-3", 104L));
+            assertThat(fixture.jdbc
+                .queryForMap("SELECT COUNT(*) AS total, MAX(status) AS status, MAX(revoke_time) AS revoke_time FROM oa_cc_receipt WHERE application_id = ?", applicationId))
+                .containsEntry("TOTAL", 1L)
+                .containsEntry("STATUS", "UNREAD")
+                .containsEntry("REVOKE_TIME", null);
+            assertThat(ccRepository.isReceiver(TENANT, applicationId, 104)).isTrue();
+
+            List<String> actions = fixture.jdbc
+                .queryForList("SELECT action FROM oa_approval_audit WHERE application_id = ? ORDER BY id", String.class, applicationId);
+            assertThat(actions).containsExactly("SUBMIT", "ADD_CC", "REVOKE_CC", "ADD_CC");
+            assertThat(fixture.approvalService.done(TENANT, 102, null, 1, 10).total()).isZero();
+
+            fixture.approvalService.approve(TENANT, 102, managerTask, action("approve-after-cc"));
+            assertThatThrownBy(() -> fixture.approvalService.addCc(TENANT, 102, managerTask, cc("cc-4", 103L)))
+                .isInstanceOf(BusinessException.class);
+        });
+    }
+
+    private static OaTaskCcReq cc(String requestId, Long... receiverIds) {
+        return new OaTaskCcReq(requestId, List.of(receiverIds), null);
+    }
+
     private static OaApprovalActionReq action(String requestId) {
         return new OaApprovalActionReq(requestId, null);
     }
@@ -688,12 +768,13 @@ class OaApprovalServiceTest {
         OaApprovalEngine approvalEngine = new OaApprovalEngine(runtimeService, taskService, historyService, repositoryService);
         OaAttachmentService attachmentService = new OaAttachmentService(new OaAttachmentRepository(jdbc), approvalEngine);
         OaOutboxService outboxService = new OaOutboxService(new OaOutboxRepository(jdbc), new ObjectMapper());
+        OaCcService ccService = new OaCcService(new OaCcRepository(jdbc), launchRepository, outboxService);
         OaLaunchService launchService = new OaLaunchService(launchRepository, new OaBpmnValidator(List
-            .of()), new OaFormValueValidator(), attachmentService, launcher, approvalEngine, outboxService, new OaCcService(new OaCcRepository(jdbc), launchRepository, outboxService), new OaDraftRepository(jdbc), new ObjectMapper(), transactionManager);
+            .of()), new OaFormValueValidator(), attachmentService, launcher, approvalEngine, outboxService, ccService, new OaDraftRepository(jdbc), new ObjectMapper(), transactionManager);
         StubStaffDirectory directory = new StubStaffDirectory();
         OaDelegateRepository delegateRepository = new OaDelegateRepository(jdbc);
         OaApprovalRepository approvalRepository = new OaApprovalRepository(jdbc);
-        OaApprovalService approvalService = new OaApprovalService(approvalRepository, launchRepository, delegateRepository, directory, approvalEngine, outboxService, new ObjectMapper(), transactionManager);
+        OaApprovalService approvalService = new OaApprovalService(approvalRepository, launchRepository, delegateRepository, directory, approvalEngine, outboxService, ccService, new ObjectMapper(), transactionManager);
         OaDelegateService delegateService = new OaDelegateService(delegateRepository, directory);
         OaTaskHandover handover = new OaTaskHandoverService(approvalEngine, approvalRepository, directory, outboxService, new ObjectMapper());
         return new Fixture(jdbc, launchService, approvalService, delegateService, handover, runtimeService, taskService);
@@ -729,7 +810,7 @@ class OaApprovalServiceTest {
     }
 
     private static void createTables(JdbcTemplate jdbc) {
-        jdbc.execute("CREATE TABLE oa_cc_receipt (id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY, tenant_id BIGINT NOT NULL, application_id BIGINT NOT NULL, process_instance_id VARCHAR(64), receiver_id BIGINT NOT NULL, receiver_name VARCHAR(64), source_task_id VARCHAR(64), status VARCHAR(20) NOT NULL DEFAULT 'UNREAD', read_time TIMESTAMP, create_time TIMESTAMP NOT NULL, CONSTRAINT uk_cc UNIQUE (tenant_id, application_id, receiver_id))");
+        jdbc.execute("CREATE TABLE oa_cc_receipt (id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY, tenant_id BIGINT NOT NULL, application_id BIGINT NOT NULL, process_instance_id VARCHAR(64), receiver_id BIGINT NOT NULL, receiver_name VARCHAR(64), source_task_id VARCHAR(64), cc_by BIGINT, status VARCHAR(20) NOT NULL DEFAULT 'UNREAD', read_time TIMESTAMP, revoke_by BIGINT, revoke_time TIMESTAMP, create_time TIMESTAMP NOT NULL, CONSTRAINT uk_cc UNIQUE (tenant_id, application_id, receiver_id))");
         jdbc.execute("CREATE TABLE sys_user (id BIGINT PRIMARY KEY, tenant_id BIGINT NOT NULL, username VARCHAR(64) NOT NULL, nickname VARCHAR(64), dept_id BIGINT, status INT NOT NULL, deleted BIGINT NOT NULL DEFAULT 0)");
         jdbc.execute("CREATE TABLE sys_dept (id BIGINT PRIMARY KEY, tenant_id BIGINT NOT NULL, name VARCHAR(100) NOT NULL, deleted BIGINT NOT NULL DEFAULT 0)");
         jdbc.execute("CREATE TABLE sys_role (id BIGINT PRIMARY KEY, tenant_id BIGINT NOT NULL, code VARCHAR(64) NOT NULL, deleted BIGINT NOT NULL DEFAULT 0)");

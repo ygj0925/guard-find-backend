@@ -82,16 +82,65 @@ public class OaCcRepository {
                                long applicationId,
                                String processInstanceId,
                                Map<Long, String> receivers,
+                               String sourceTaskId,
+                               long ccBy,
                                LocalDateTime now) {
         List<Object[]> rows = new ArrayList<>();
         receivers.forEach((id, name) -> rows.add(new Object[] {tenantId, applicationId, processInstanceId, id, name,
-            now}));
+            sourceTaskId, ccBy, now}));
         jdbcTemplate
             .batchUpdate("""
                 INSERT INTO oa_cc_receipt
-                  (tenant_id, application_id, process_instance_id, receiver_id, receiver_name, source_task_id, status, create_time)
-                VALUES (?, ?, ?, ?, ?, NULL, 'UNREAD', ?)
+                  (tenant_id, application_id, process_instance_id, receiver_id, receiver_name, source_task_id, cc_by, status, create_time)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'UNREAD', ?)
                 """, rows);
+    }
+
+    /**
+     * 唯一键按申请+接收人，撤销后再次抄送复用原行并重置为未读。
+     */
+    public int reactivate(long tenantId,
+                          long applicationId,
+                          long receiverId,
+                          String receiverName,
+                          String sourceTaskId,
+                          long ccBy,
+                          LocalDateTime now) {
+        return jdbcTemplate.update("""
+            UPDATE oa_cc_receipt
+               SET status = 'UNREAD', read_time = NULL, revoke_by = NULL, revoke_time = NULL,
+                   receiver_name = ?, source_task_id = ?, cc_by = ?, create_time = ?
+             WHERE tenant_id = ? AND application_id = ? AND receiver_id = ? AND status = 'REVOKED'
+            """, receiverName, sourceTaskId, ccBy, now, tenantId, applicationId, receiverId);
+    }
+
+    public Map<Long, String> receiptStatuses(long tenantId, long applicationId) {
+        Map<Long, String> statuses = new LinkedHashMap<>();
+        jdbcTemplate.query("""
+            SELECT receiver_id, status FROM oa_cc_receipt WHERE tenant_id = ? AND application_id = ? ORDER BY id
+            """, rs -> {
+            statuses.put(rs.getLong("receiver_id"), rs.getString("status"));
+        }, tenantId, applicationId);
+        return statuses;
+    }
+
+    public CcReceipt receipt(long tenantId, long applicationId, long receiverId) {
+        List<CcReceipt> rows = jdbcTemplate.query("""
+            SELECT receiver_id, receiver_name, cc_by, status
+              FROM oa_cc_receipt
+             WHERE tenant_id = ? AND application_id = ? AND receiver_id = ?
+            """, (rs, rowNum) -> new CcReceipt(rs.getLong("receiver_id"), rs.getString("receiver_name"), rs
+            .getObject("cc_by") == null ? null : rs.getLong("cc_by"), rs
+                .getString("status")), tenantId, applicationId, receiverId);
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    public int revoke(long tenantId, long applicationId, long receiverId, long revokeBy, LocalDateTime now) {
+        return jdbcTemplate.update("""
+            UPDATE oa_cc_receipt
+               SET status = 'REVOKED', revoke_by = ?, revoke_time = ?
+             WHERE tenant_id = ? AND application_id = ? AND receiver_id = ? AND status <> 'REVOKED'
+            """, revokeBy, now, tenantId, applicationId, receiverId);
     }
 
     public List<OaCcResp> page(long tenantId, long receiverId, String keyword, String status, int offset, int size) {
@@ -131,7 +180,8 @@ public class OaCcRepository {
 
     public boolean isReceiver(long tenantId, long applicationId, long userId) {
         Integer count = jdbcTemplate.queryForObject("""
-            SELECT COUNT(*) FROM oa_cc_receipt WHERE tenant_id = ? AND application_id = ? AND receiver_id = ?
+            SELECT COUNT(*) FROM oa_cc_receipt
+             WHERE tenant_id = ? AND application_id = ? AND receiver_id = ? AND status <> 'REVOKED'
             """, Integer.class, tenantId, applicationId, userId);
         return count != null && count > 0;
     }
@@ -155,11 +205,16 @@ public class OaCcRepository {
         if (status != null && !status.isBlank()) {
             sql.append(" AND c.status = ?");
             args.add(status.trim());
+        } else {
+            sql.append(" AND c.status <> 'REVOKED'");
         }
     }
 
     private static LocalDateTime timestamp(ResultSet rs, String column) throws SQLException {
         var value = rs.getTimestamp(column);
         return value == null ? null : value.toLocalDateTime();
+    }
+
+    public record CcReceipt(long receiverId, String receiverName, Long ccBy, String status) {
     }
 }

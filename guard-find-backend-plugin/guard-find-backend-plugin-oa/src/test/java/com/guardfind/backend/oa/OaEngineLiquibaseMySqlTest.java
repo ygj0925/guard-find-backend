@@ -214,7 +214,7 @@ class OaEngineLiquibaseMySqlTest {
         assertThat(indexes(connection, "oa_approval_audit"))
             .contains("uk_tenant_request", "idx_tenant_application_time", "idx_tenant_operator");
         assertThat(columns(connection, "oa_cc_receipt"))
-            .contains("application_id", "receiver_id", "source_task_id", "status", "read_time");
+            .contains("application_id", "receiver_id", "source_task_id", "cc_by", "status", "read_time", "revoke_by", "revoke_time");
         assertThat(indexes(connection, "oa_cc_receipt"))
             .contains("uk_tenant_application_receiver", "idx_tenant_receiver_status");
         assertThat(columns(connection, "oa_application_draft"))

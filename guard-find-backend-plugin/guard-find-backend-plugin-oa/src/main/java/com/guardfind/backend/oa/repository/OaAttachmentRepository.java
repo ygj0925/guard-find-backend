@@ -149,7 +149,7 @@ public class OaAttachmentRepository {
         Integer count = jdbcTemplate.queryForObject("""
             SELECT COUNT(*)
               FROM oa_cc_receipt
-             WHERE tenant_id = ? AND application_id = ? AND receiver_id = ?
+             WHERE tenant_id = ? AND application_id = ? AND receiver_id = ? AND status <> 'REVOKED'
             """, Integer.class, tenantId, applicationId, userId);
         return count != null && count > 0;
     }

@@ -105,3 +105,6 @@ databaseChangeLog:
   # OA 抄送我的菜单与权限
   - include:
       file: classpath:db/changelog/mysql/oa/oa_cc_menu.sql
+  # OA 审批中追加抄送与抄送撤销
+  - include:
+      file: classpath:db/changelog/mysql/oa/oa_cc_manage.sql

@@ -17,6 +17,7 @@
 package com.guardfind.backend.oa.controller;
 
 import cn.dev33.satoken.annotation.SaCheckPermission;
+import cn.dev33.satoken.annotation.SaMode;
 import com.guardfind.backend.common.context.UserContextHolder;
 import com.guardfind.backend.oa.model.OaApprovalActionReq;
 import com.guardfind.backend.oa.model.OaApprovalActionResp;
@@ -24,6 +25,7 @@ import com.guardfind.backend.oa.model.OaApprovalDetailResp;
 import com.guardfind.backend.oa.model.OaDelegateRuleCreateReq;
 import com.guardfind.backend.oa.model.OaDelegateRuleResp;
 import com.guardfind.backend.oa.model.OaDoneRecordResp;
+import com.guardfind.backend.oa.model.OaTaskCcReq;
 import com.guardfind.backend.oa.model.OaTaskTransferReq;
 import com.guardfind.backend.oa.model.OaTodoTaskResp;
 import com.guardfind.backend.oa.service.OaApprovalService;
@@ -120,6 +122,22 @@ public class OaApprovalController {
     @PostMapping("/task/{taskId}/transfer")
     public OaApprovalActionResp transfer(@PathVariable String taskId, @Valid @RequestBody OaTaskTransferReq req) {
         return service.transfer(tenantId(), userId(), taskId, req);
+    }
+
+    @Operation(summary = "审批中追加抄送")
+    @SaCheckPermission("system:oa:approval:action")
+    @PostMapping("/task/{taskId}/cc")
+    public OaApprovalActionResp addCc(@PathVariable String taskId, @Valid @RequestBody OaTaskCcReq req) {
+        return service.addCc(tenantId(), userId(), taskId, req);
+    }
+
+    @Operation(summary = "撤销本人发起的抄送")
+    @SaCheckPermission(value = {"system:oa:launch:submit", "system:oa:approval:action"}, mode = SaMode.OR)
+    @PostMapping("/application/{applicationId}/cc/{receiverId}/revoke")
+    public OaApprovalActionResp revokeCc(@PathVariable Long applicationId,
+                                         @PathVariable Long receiverId,
+                                         @Valid @RequestBody OaApprovalActionReq req) {
+        return service.revokeCc(tenantId(), userId(), applicationId, receiverId, req);
     }
 
     @Operation(summary = "我的代理规则")

@@ -19,7 +19,8 @@ package com.guardfind.backend.oa.model;
 import java.time.LocalDateTime;
 
 /**
- * 申请详情中的抄送接收人与阅读状态。
+ * 申请详情中的抄送接收人与阅读状态；REVOKED 表示已撤销，接收人不再可见。
  */
-public record OaCcReceiverResp(Long receiverId, String receiverName, String status, LocalDateTime readTime) {
+public record OaCcReceiverResp(Long receiverId, String receiverName, String status, LocalDateTime readTime, Long ccById,
+                               String ccByName, String sourceTaskId, LocalDateTime revokeTime) {
 }

@@ -372,12 +372,15 @@ public class OaLaunchRepository {
 
     public List<OaCcReceiverResp> ccReceivers(long tenantId, long applicationId) {
         return jdbcTemplate.query("""
-            SELECT receiver_id, receiver_name, status, read_time
-              FROM oa_cc_receipt
-             WHERE tenant_id = ? AND application_id = ?
-             ORDER BY id
+            SELECT c.receiver_id, c.receiver_name, c.status, c.read_time, c.cc_by, c.source_task_id, c.revoke_time,
+                   COALESCE(NULLIF(u.nickname, ''), u.username) AS cc_by_name
+              FROM oa_cc_receipt c
+              LEFT JOIN sys_user u ON u.id = c.cc_by AND u.tenant_id = c.tenant_id
+             WHERE c.tenant_id = ? AND c.application_id = ?
+             ORDER BY c.id
             """, (rs, rowNum) -> new OaCcReceiverResp(rs.getLong("receiver_id"), rs.getString("receiver_name"), rs
-            .getString("status"), timestamp(rs, "read_time")), tenantId, applicationId);
+            .getString("status"), timestamp(rs, "read_time"), nullableLong(rs, "cc_by"), rs.getString("cc_by_name"), rs
+                .getString("source_task_id"), timestamp(rs, "revoke_time")), tenantId, applicationId);
     }
 
     /**

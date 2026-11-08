@@ -23,12 +23,14 @@ import com.guardfind.backend.oa.model.OaApprovalActionReq;
 import com.guardfind.backend.oa.model.OaApprovalActionResp;
 import com.guardfind.backend.oa.model.OaApprovalDetailResp;
 import com.guardfind.backend.oa.model.OaDoneRecordResp;
+import com.guardfind.backend.oa.model.OaTaskCcReq;
 import com.guardfind.backend.oa.model.OaTaskTransferReq;
 import com.guardfind.backend.oa.model.OaTodoTaskResp;
 import com.guardfind.backend.oa.repository.OaApprovalRepository;
 import com.guardfind.backend.oa.repository.OaApprovalRepository.ApprovalApplication;
 import com.guardfind.backend.oa.repository.OaApprovalRepository.ApplicationBrief;
 import com.guardfind.backend.oa.repository.OaApprovalRepository.TodoApplication;
+import com.guardfind.backend.oa.repository.OaCcRepository;
 import com.guardfind.backend.oa.repository.OaDelegateRepository;
 import com.guardfind.backend.oa.repository.OaDelegateRepository.Delegation;
 import com.guardfind.backend.oa.repository.OaLaunchRepository;
@@ -70,6 +72,8 @@ public class OaApprovalService {
     public static final String COMMAND_WITHDRAW = "WITHDRAW";
     public static final String COMMAND_CLAIM = "CLAIM";
     public static final String COMMAND_TRANSFER = "TRANSFER";
+    public static final String COMMAND_ADD_CC = "ADD_CC";
+    public static final String COMMAND_REVOKE_CC = "REVOKE_CC";
 
     private static final int DEDUP_TTL_HOURS = 24;
     private static final int TODO_SCAN_LIMIT = 200;
@@ -81,6 +85,7 @@ public class OaApprovalService {
     private final OaStaffDirectory staffDirectory;
     private final OaApprovalEngine engine;
     private final OaOutboxService outboxService;
+    private final OaCcService ccService;
     private final ObjectMapper objectMapper;
     private final TransactionTemplate transactionTemplate;
 
@@ -90,6 +95,7 @@ public class OaApprovalService {
                              OaStaffDirectory staffDirectory,
                              OaApprovalEngine engine,
                              OaOutboxService outboxService,
+                             OaCcService ccService,
                              ObjectMapper objectMapper,
                              PlatformTransactionManager transactionManager) {
         this.approvalRepository = approvalRepository;
@@ -98,6 +104,7 @@ public class OaApprovalService {
         this.staffDirectory = staffDirectory;
         this.engine = engine;
         this.outboxService = outboxService;
+        this.ccService = ccService;
         this.objectMapper = objectMapper;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
@@ -400,6 +407,68 @@ public class OaApprovalService {
             approvalRepository.insertAudit(tenantId, applicationId, application
                 .processInstanceId(), null, COMMAND_WITHDRAW, userId, operatorName(tenantId, userId), null, reason, requestId, writeJson(detail), now);
             return new OaApprovalActionResp(applicationId, "WITHDRAWN", null, false);
+        });
+    }
+
+    /**
+     * 审批中追加抄送：仅当前任务处理人（含代理人）可追加，抄送人记为操作人本人。
+     */
+    public OaApprovalActionResp addCc(long tenantId, long userId, String taskId, OaTaskCcReq req) {
+        if (req == null) {
+            throw new BusinessException("抄送参数不能为空");
+        }
+        String requestId = requireRequestId(req.requestId());
+        String reason = optionalReason(req.reason());
+        return command(tenantId, userId, COMMAND_ADD_CC, requestId, () -> {
+            ActionContext context = prepareAction(tenantId, userId, taskId);
+            ApprovalApplication application = approvalRepository.lockApplication(tenantId, context.application().id());
+            if (application == null || !"RUNNING".equals(application.status())) {
+                throw new BusinessException("申请已结束，无法追加抄送");
+            }
+            LocalDateTime now = LocalDateTime.now();
+            Map<Long, String> added = ccService.append(tenantId, application.id(), application
+                .processInstanceId(), application.applicantId(), userId, req.receiverIds(), taskId, now);
+            Map<String, Object> detail = actionDetail(requestId, context.task());
+            detail.put("ccUserIds", added.keySet().stream().map(String::valueOf).toList());
+            detail.put("applicationStatus", "RUNNING");
+            putProxy(detail, context);
+            String operator = operatorName(tenantId, userId);
+            approvalRepository.insertAudit(tenantId, application.id(), application.processInstanceId(), context.task()
+                .getId(), COMMAND_ADD_CC, userId, operator, originalAssignee(context), reason, requestId, writeJson(detail), now);
+            ApplicationBrief brief = approvalRepository.applicationBrief(tenantId, application.id());
+            outboxService.recordNotification(tenantId, OaOutboxService.AGGREGATE_APPLICATION, Long.toString(application
+                .id()), OaOutboxService.EVENT_APPLICATION_CC, "CC_ADD:" + requestId, application
+                    .id(), null, "CC", "抄送：" + titleOf(brief), operator + " 在审批「" + titleOf(brief) + "」时抄送给您", new ArrayList<>(added
+                        .keySet()));
+            return new OaApprovalActionResp(application.id(), "RUNNING", taskId, false);
+        });
+    }
+
+    /**
+     * 撤销抄送：只能撤销自己发起的那条抄送（发起时抄送归申请人，审批中追加归追加人），申请结束后仍可撤销。
+     */
+    public OaApprovalActionResp revokeCc(long tenantId,
+                                         long userId,
+                                         long applicationId,
+                                         long receiverId,
+                                         OaApprovalActionReq req) {
+        String requestId = requireRequestId(req);
+        String reason = optionalReason(req.reason());
+        return command(tenantId, userId, COMMAND_REVOKE_CC, requestId, () -> {
+            ApprovalApplication application = approvalRepository.lockApplication(tenantId, applicationId);
+            if (application == null) {
+                throw new BusinessException("申请不存在或无权操作");
+            }
+            LocalDateTime now = LocalDateTime.now();
+            OaCcRepository.CcReceipt receipt = ccService.revoke(tenantId, applicationId, receiverId, userId, now);
+            Map<String, Object> detail = new LinkedHashMap<>();
+            detail.put("requestId", requestId);
+            detail.put("targetUserId", receiverId);
+            detail.put("previousStatus", receipt.status());
+            detail.put("applicationStatus", application.status());
+            approvalRepository.insertAudit(tenantId, applicationId, application
+                .processInstanceId(), null, COMMAND_REVOKE_CC, userId, operatorName(tenantId, userId), null, reason, requestId, writeJson(detail), now);
+            return new OaApprovalActionResp(applicationId, application.status(), null, false);
         });
     }
 
