@@ -17,6 +17,9 @@
 package com.guardfind.backend.oa;
 
 import com.guardfind.backend.oa.bpmn.OaBpmnValidator;
+import com.guardfind.backend.oa.business.OaBusinessHooks;
+import com.guardfind.backend.oa.leave.OaLeaveHook;
+import com.guardfind.backend.oa.repository.OaLeaveRepository;
 import com.guardfind.backend.oa.config.OaFlowableConfiguration;
 import com.guardfind.backend.oa.model.OaProcessModelCreateReq;
 import com.guardfind.backend.oa.model.OaProcessModelResp;
@@ -110,7 +113,7 @@ class OaProcessModelServiceTest {
         runner().run(context -> {
             Fixture fixture = fixture(context);
             OaProcessModelResp created = fixture.service
-                .create(101, 7, new OaProcessModelCreateReq("leave", "请假", "hr", "说明", BPMN));
+                .create(101, 7, new OaProcessModelCreateReq("leave", "请假", "hr", "说明", BPMN, null));
             assertThat(created.status()).isEqualTo("DRAFT");
             assertThat(created.version()).isZero();
             assertThat(created.xmlDigest()).hasSize(64);
@@ -132,7 +135,7 @@ class OaProcessModelServiceTest {
             Fixture fixture = fixture(context);
             insertFormVersion(fixture.jdbc);
             OaProcessModelResp created = fixture.service
-                .create(101, 7, new OaProcessModelCreateReq("leave", "请假", null, null, BPMN));
+                .create(101, 7, new OaProcessModelCreateReq("leave", "请假", null, null, BPMN, null));
 
             assertThat(fixture.service.validate(BPMN).valid()).isTrue();
             OaProcessPublishResp published = fixture.service.publish(101, 7, created
@@ -167,11 +170,31 @@ class OaProcessModelServiceTest {
     }
 
     @Test
+    void leaveModelRejectsFormWithoutLeaveFields() {
+        runner().run(context -> {
+            Fixture fixture = fixture(context);
+            insertFormVersion(fixture.jdbc);
+            OaProcessModelResp created = fixture.service
+                .create(101, 7, new OaProcessModelCreateReq("leave", "请假", null, null, BPMN, "LEAVE"));
+            assertThat(created.businessType()).isEqualTo("LEAVE");
+
+            OaProcessPublishResp result = fixture.service.publish(101, 7, created
+                .id(), new OaProcessPublishReq(9001L, null, null));
+
+            assertThat(result.valid()).isFalse();
+            assertThat(result.errors()).anyMatch(error -> error.contains("leaveType"))
+                .anyMatch(error -> error.contains("startDate"));
+            assertThat(fixture.service.releases(101, created.id())).isEmpty();
+            assertThat(fixture.service.detail(101, created.id()).status()).isEqualTo("DRAFT");
+        });
+    }
+
+    @Test
     void rejectsPublishWithoutFormVersion() {
         runner().run(context -> {
             Fixture fixture = fixture(context);
             OaProcessModelResp created = fixture.service
-                .create(101, 7, new OaProcessModelCreateReq("leave", "请假", null, null, BPMN));
+                .create(101, 7, new OaProcessModelCreateReq("leave", "请假", null, null, BPMN, null));
 
             OaProcessPublishResp result = fixture.service.publish(101, 7, created
                 .id(), new OaProcessPublishReq(null, null, null));
@@ -190,7 +213,7 @@ class OaProcessModelServiceTest {
             Fixture fixture = fixture(context);
             insertFormVersion(fixture.jdbc);
             OaProcessModelResp created = fixture.service
-                .create(101, 7, new OaProcessModelCreateReq("leave", "请假", null, null, BPMN));
+                .create(101, 7, new OaProcessModelCreateReq("leave", "请假", null, null, BPMN, null));
             OaProcessPublishResp v1 = fixture.service.publish(101, 7, created
                 .id(), new OaProcessPublishReq(9001L, null, null));
             ProcessInstance running = fixture.runtimeService
@@ -232,7 +255,7 @@ class OaProcessModelServiceTest {
             Fixture fixture = fixture(context);
             insertFormVersion(fixture.jdbc);
             OaProcessModelResp created = fixture.service
-                .create(101, 7, new OaProcessModelCreateReq("broken", "坏流程", null, null, INVALID_BPMN));
+                .create(101, 7, new OaProcessModelCreateReq("broken", "坏流程", null, null, INVALID_BPMN, null));
 
             OaProcessPublishResp result = fixture.service.publish(101, 7, created
                 .id(), new OaProcessPublishReq(9001L, null, null));
@@ -251,7 +274,7 @@ class OaProcessModelServiceTest {
             Fixture fixture = fixture(context);
             insertFormVersion(fixture.jdbc);
             OaProcessModelResp created = fixture.service
-                .create(101, 7, new OaProcessModelCreateReq("leave", "请假", null, null, BPMN));
+                .create(101, 7, new OaProcessModelCreateReq("leave", "请假", null, null, BPMN, null));
             fixture.service.publish(101, 7, created.id(), new OaProcessPublishReq(9001L, null, null));
 
             OaProcessModelResp disabled = fixture.service.disable(101, 7, created.id());
@@ -265,7 +288,7 @@ class OaProcessModelServiceTest {
             assertThat(fixture.service.detail(101, created.id()).status()).isEqualTo("PUBLISHED");
 
             OaProcessModelResp other = fixture.service
-                .create(101, 7, new OaProcessModelCreateReq("leave-other", "另一个请假", null, null, BPMN));
+                .create(101, 7, new OaProcessModelCreateReq("leave-other", "另一个请假", null, null, BPMN, null));
             OaProcessPublishResp conflict = fixture.service.publish(101, 7, other
                 .id(), new OaProcessPublishReq(9001L, null, null));
             assertThat(conflict.valid()).isFalse();
@@ -279,7 +302,7 @@ class OaProcessModelServiceTest {
             Fixture fixture = fixture(context);
             insertFormVersion(fixture.jdbc);
             OaProcessModelResp created = fixture.service
-                .create(101, 7, new OaProcessModelCreateReq("leave", "请假", null, null, BPMN));
+                .create(101, 7, new OaProcessModelCreateReq("leave", "请假", null, null, BPMN, null));
 
             OaProcessPublishResp result = fixture.service.publish(101, 7, created
                 .id(), new OaProcessPublishReq(9001L, "{\"users\":[\"abc\"]}", null));
@@ -298,7 +321,7 @@ class OaProcessModelServiceTest {
             Fixture fixture = fixture(context);
             insertFormVersion(fixture.jdbc);
             OaProcessModelResp created = fixture.service
-                .create(101, 7, new OaProcessModelCreateReq("static", "静态审批人", null, null, STATIC_ASSIGNEE_BPMN));
+                .create(101, 7, new OaProcessModelCreateReq("static", "静态审批人", null, null, STATIC_ASSIGNEE_BPMN, null));
 
             OaProcessPublishResp result = fixture.service.publish(101, 7, created
                 .id(), new OaProcessPublishReq(9001L, null, null));
@@ -317,8 +340,9 @@ class OaProcessModelServiceTest {
         createTables(jdbc);
         OaProcessModelRepository repository = new OaProcessModelRepository(jdbc);
         OaProcessModelService service = new OaProcessModelService(repository, new OaBpmnValidator(List
-            .of()), new OaAssigneeResolver(new StubStaffDirectory()), context.getBean(RepositoryService.class), context
-                .getBean(PlatformTransactionManager.class));
+            .of()), new OaAssigneeResolver(new StubStaffDirectory()), new OaBusinessHooks(List
+                .of(new OaLeaveHook(new OaLeaveRepository(jdbc))), null), context
+                    .getBean(RepositoryService.class), context.getBean(PlatformTransactionManager.class));
         return new Fixture(service, repository, jdbc, context.getBean(RuntimeService.class), context
             .getBean(TaskService.class), context.getBean(RepositoryService.class));
     }
@@ -374,6 +398,7 @@ class OaProcessModelServiceTest {
               name VARCHAR(100) NOT NULL,
               category VARCHAR(64),
               description VARCHAR(500),
+              business_type VARCHAR(32) NOT NULL DEFAULT 'GENERIC',
               bpmn_xml CLOB,
               xml_digest VARCHAR(64),
               status VARCHAR(20) NOT NULL DEFAULT 'DRAFT',

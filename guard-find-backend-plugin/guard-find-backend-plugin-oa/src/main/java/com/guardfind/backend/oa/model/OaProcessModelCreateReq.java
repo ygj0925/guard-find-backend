@@ -26,5 +26,6 @@ import jakarta.validation.constraints.Size;
 public record OaProcessModelCreateReq(@NotBlank(message = "模型标识不能为空") @Pattern(regexp = "[A-Za-z_][A-Za-z0-9_]{0,63}", message = "模型标识只能包含字母、数字、下划线，且以字母或下划线开头") String modelKey,
                                       @NotBlank(message = "模型名称不能为空") @Size(max = 100, message = "模型名称不能超过 100 个字符") String name,
                                       @Size(max = 64, message = "分类不能超过 64 个字符") String category,
-                                      @Size(max = 500, message = "说明不能超过 500 个字符") String description, String bpmnXml) {
+                                      @Size(max = 500, message = "说明不能超过 500 个字符") String description, String bpmnXml,
+                                      @Pattern(regexp = "GENERIC|LEAVE|EXPENSE", message = "业务类型只能是 GENERIC、LEAVE 或 EXPENSE") String businessType) {
 }

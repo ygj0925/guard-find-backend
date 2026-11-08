@@ -20,6 +20,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.guardfind.backend.oa.bpmn.OaBpmnValidationResult;
 import com.guardfind.backend.oa.bpmn.OaBpmnValidator;
+import com.guardfind.backend.oa.business.OaBusinessHook;
+import com.guardfind.backend.oa.business.OaBusinessHooks;
+import com.guardfind.backend.oa.business.OaBusinessPreparation;
 import com.guardfind.backend.oa.engine.OaApprovalEngine;
 import com.guardfind.backend.oa.form.OaFormValueValidator;
 import com.guardfind.backend.oa.launch.OaLaunchScope;
@@ -82,6 +85,7 @@ public class OaLaunchService {
     private final OaOutboxService outboxService;
     private final OaCcService ccService;
     private final OaDraftRepository draftRepository;
+    private final OaBusinessHooks businessHooks;
     private final ObjectMapper objectMapper;
     private final TransactionTemplate transactionTemplate;
 
@@ -94,6 +98,7 @@ public class OaLaunchService {
                            OaOutboxService outboxService,
                            OaCcService ccService,
                            OaDraftRepository draftRepository,
+                           OaBusinessHooks businessHooks,
                            ObjectMapper objectMapper,
                            PlatformTransactionManager transactionManager) {
         this.repository = repository;
@@ -105,6 +110,7 @@ public class OaLaunchService {
         this.outboxService = outboxService;
         this.ccService = ccService;
         this.draftRepository = draftRepository;
+        this.businessHooks = businessHooks;
         this.objectMapper = objectMapper;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
@@ -130,15 +136,18 @@ public class OaLaunchService {
         OaLaunchRelease release = requireLaunchable(tenantId, releaseId, profile);
         OaBpmnValidationResult validation = supportableValidation(release);
         Set<String> personFields = personFields(release.schemaJson());
+        Map<String, OaAssigneeSpec> defaults = businessHooks.defaultAssignees(release.businessType());
         List<OaAssigneeVariableResp> variables = validation.assigneeVariables()
             .stream()
-            .map(name -> suggestion(name, personFields))
+            .map(name -> suggestion(name, personFields, defaults))
             .toList();
         return new OaLaunchDetailResp(release.releaseId(), release.modelId(), release.modelKey(), release
             .modelName(), release.category(), release.description(), release.releaseVersion(), release
                 .processDefinitionKey(), release.formId(), release.formVersionId(), release.formVersion(), release
                     .formName(), release.formKey(), release.schemaJson(), release.schemaDigest(), release
-                        .launchScope(), true, variables);
+                        .launchScope(), true, variables, release.businessType() == null
+                            ? OaBusinessHooks.GENERIC
+                            : release.businessType());
     }
 
     /**
@@ -195,11 +204,17 @@ public class OaLaunchService {
         Map<String, Object> normalized = prepared.values();
 
         Set<String> personFields = personFields(release.schemaJson());
-        Map<String, OaAssigneeSpec> bindings = resolveBindings(validation, req.assignees(), personFields);
+        Map<String, OaAssigneeSpec> bindings = resolveBindings(validation, req.assignees(), personFields, businessHooks
+            .defaultAssignees(release.businessType()));
         Map<Long, String> ccReceivers = ccService.resolveReceivers(tenantId, userId, req.ccUserIds());
 
         Map<String, Object> variables = new LinkedHashMap<>(normalized);
         variables.put(OaAssigneeContext.FORM_DATA_VARIABLE, Map.copyOf(normalized));
+        OaBusinessHook hook = businessHooks.find(release.businessType());
+        OaBusinessPreparation preparation = hook == null ? null : hook.prepare(tenantId, userId, normalized);
+        if (preparation != null) {
+            variables.putAll(preparation.variables());
+        }
         String title = title(req.title(), release.modelName());
         String businessKey = businessKey(release.releaseId(), now);
 
@@ -216,6 +231,9 @@ public class OaLaunchService {
             .modelKey(), businessKey, title, userId, profile.name(), profile.deptId(), profile.deptName(), release
                 .releaseId(), release.formVersionId(), release.formVersion(), writeJson(normalized), instance
                     .getId(), now);
+        if (hook != null) {
+            hook.submitted(tenantId, applicationId, userId, preparation, now);
+        }
         attachmentService.link(tenantId, applicationId, release.modelKey(), businessKey, userId, prepared
             .attachments(), now);
         repository.insertAudit(tenantId, applicationId, instance.getId(), "SUBMIT", userId, profile
@@ -306,7 +324,8 @@ public class OaLaunchService {
 
     private Map<String, OaAssigneeSpec> resolveBindings(OaBpmnValidationResult validation,
                                                         List<OaAssigneeBindingReq> requested,
-                                                        Set<String> personFields) {
+                                                        Set<String> personFields,
+                                                        Map<String, OaAssigneeSpec> defaults) {
         Set<String> required = new LinkedHashSet<>(validation.assigneeVariables());
         Map<String, OaAssigneeBindingReq> provided = new LinkedHashMap<>();
         if (requested != null) {
@@ -326,7 +345,9 @@ public class OaLaunchService {
         Map<String, OaAssigneeSpec> specs = new LinkedHashMap<>();
         for (String name : required) {
             OaAssigneeBindingReq binding = provided.get(name);
-            OaAssigneeSpec spec = binding == null ? autoSpec(name, personFields) : toSpec(name, binding, personFields);
+            OaAssigneeSpec spec = binding == null
+                ? autoSpec(name, personFields, defaults)
+                : toSpec(name, binding, personFields);
             if (spec == null) {
                 throw new BusinessException("审批人变量 " + name + " 未绑定来源");
             }
@@ -335,9 +356,14 @@ public class OaLaunchService {
         return specs;
     }
 
-    private OaAssigneeSpec autoSpec(String variableName, Set<String> personFields) {
+    private OaAssigneeSpec autoSpec(String variableName,
+                                    Set<String> personFields,
+                                    Map<String, OaAssigneeSpec> defaults) {
         if (personFields.contains(variableName)) {
             return OaAssigneeSpec.formField(variableName);
+        }
+        if (defaults.containsKey(variableName)) {
+            return defaults.get(variableName);
         }
         String normalized = variableName.toLowerCase(Locale.ROOT);
         if (Set.of("supervisor", "directsupervisor").contains(normalized)) {
@@ -367,8 +393,10 @@ public class OaLaunchService {
         }
     }
 
-    private OaAssigneeVariableResp suggestion(String variableName, Set<String> personFields) {
-        OaAssigneeSpec spec = autoSpec(variableName, personFields);
+    private OaAssigneeVariableResp suggestion(String variableName,
+                                              Set<String> personFields,
+                                              Map<String, OaAssigneeSpec> defaults) {
+        OaAssigneeSpec spec = autoSpec(variableName, personFields, defaults);
         if (spec == null) {
             return new OaAssigneeVariableResp(variableName, null, null);
         }

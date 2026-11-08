@@ -18,6 +18,7 @@ package com.guardfind.backend.oa;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.guardfind.backend.oa.bpmn.OaBpmnValidator;
+import com.guardfind.backend.oa.business.OaBusinessHooks;
 import com.guardfind.backend.oa.config.OaFlowableConfiguration;
 import com.guardfind.backend.oa.engine.OaApprovalEngine;
 import com.guardfind.backend.oa.engine.OaEngineTemplate;
@@ -770,11 +771,13 @@ class OaApprovalServiceTest {
         OaOutboxService outboxService = new OaOutboxService(new OaOutboxRepository(jdbc), new ObjectMapper());
         OaCcService ccService = new OaCcService(new OaCcRepository(jdbc), launchRepository, outboxService);
         OaLaunchService launchService = new OaLaunchService(launchRepository, new OaBpmnValidator(List
-            .of()), new OaFormValueValidator(), attachmentService, launcher, approvalEngine, outboxService, ccService, new OaDraftRepository(jdbc), new ObjectMapper(), transactionManager);
+            .of()), new OaFormValueValidator(), attachmentService, launcher, approvalEngine, outboxService, ccService, new OaDraftRepository(jdbc), new OaBusinessHooks(List
+                .of(), launchRepository), new ObjectMapper(), transactionManager);
         StubStaffDirectory directory = new StubStaffDirectory();
         OaDelegateRepository delegateRepository = new OaDelegateRepository(jdbc);
         OaApprovalRepository approvalRepository = new OaApprovalRepository(jdbc);
-        OaApprovalService approvalService = new OaApprovalService(approvalRepository, launchRepository, delegateRepository, directory, approvalEngine, outboxService, ccService, new ObjectMapper(), transactionManager);
+        OaApprovalService approvalService = new OaApprovalService(approvalRepository, launchRepository, delegateRepository, directory, approvalEngine, outboxService, ccService, new OaBusinessHooks(List
+            .of(), launchRepository), new ObjectMapper(), transactionManager);
         OaDelegateService delegateService = new OaDelegateService(delegateRepository, directory);
         OaTaskHandover handover = new OaTaskHandoverService(approvalEngine, approvalRepository, directory, outboxService, new ObjectMapper());
         return new Fixture(jdbc, launchService, approvalService, delegateService, handover, runtimeService, taskService);
@@ -819,7 +822,7 @@ class OaApprovalServiceTest {
         jdbc.execute("""
             CREATE TABLE oa_process_model (
               id BIGINT PRIMARY KEY, tenant_id BIGINT NOT NULL, model_key VARCHAR(64) NOT NULL,
-              name VARCHAR(100) NOT NULL, category VARCHAR(64), description VARCHAR(500), status VARCHAR(20) NOT NULL,
+              name VARCHAR(100) NOT NULL, category VARCHAR(64), description VARCHAR(500), status VARCHAR(20) NOT NULL, business_type VARCHAR(32) NOT NULL DEFAULT 'GENERIC',
               current_release_id BIGINT, current_release_version INT NOT NULL DEFAULT 0, form_id BIGINT,
               form_version_id BIGINT, version INT NOT NULL DEFAULT 0, create_user BIGINT NOT NULL,
               create_time TIMESTAMP NOT NULL, update_user BIGINT, update_time TIMESTAMP,

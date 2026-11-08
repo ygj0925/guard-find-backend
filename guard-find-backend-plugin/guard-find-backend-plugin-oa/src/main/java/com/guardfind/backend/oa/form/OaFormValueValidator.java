@@ -24,6 +24,7 @@ import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -80,7 +81,11 @@ public class OaFormValueValidator {
             }
             try {
                 Object value = normalize(type, raw, field);
-                if (value != null) {
+                if (value instanceof List<?> rows && rows.isEmpty() && "table".equals(type)) {
+                    if (required) {
+                        errors.put(key, requiredMessage(type, label));
+                    }
+                } else if (value != null) {
                     normalized.put(key, value);
                 }
             } catch (IllegalArgumentException e) {
@@ -100,8 +105,65 @@ public class OaFormValueValidator {
             case "checkbox" -> checkbox(raw, field);
             case "person" -> person(raw);
             case "attachment" -> attachment(raw);
+            case "table" -> table(raw, field);
             default -> null;
         };
+    }
+
+    /**
+     * 明细表：整行为空的行直接丢弃；单元格按列类型规范化，未知列丢弃，错误带行号。
+     */
+    private static List<Map<String, Object>> table(Object raw, JsonNode field) {
+        List<Object> items = items(raw, "明细必须是行数组");
+        JsonNode maxRowsNode = field.get("maxRows");
+        int maxRows = maxRowsNode != null && maxRowsNode.canConvertToInt()
+            ? maxRowsNode.asInt()
+            : OaFormSchemaValidator.DEFAULT_TABLE_ROWS;
+        JsonNode columns = field.path("columns");
+        List<Map<String, Object>> rows = new ArrayList<>();
+        int rowNo = 0;
+        for (Object item : items) {
+            rowNo++;
+            if (!(item instanceof Map<?, ?> cells)) {
+                throw new IllegalArgumentException("第 " + rowNo + " 行格式非法");
+            }
+            Map<String, Object> row = new LinkedHashMap<>();
+            boolean blank = true;
+            for (JsonNode column : columns) {
+                if (!isEmpty(cells.get(column.path("key").asText("")))) {
+                    blank = false;
+                    break;
+                }
+            }
+            if (blank) {
+                continue;
+            }
+            for (JsonNode column : columns) {
+                String columnKey = column.path("key").asText("");
+                String columnLabel = column.path("label").asText(columnKey);
+                String columnType = column.path("type").asText("");
+                Object cell = cells.get(columnKey);
+                if (isEmpty(cell)) {
+                    if (column.path("required").asBoolean(false)) {
+                        throw new IllegalArgumentException("第 " + rowNo + " 行" + requiredMessage(columnType, columnLabel));
+                    }
+                    continue;
+                }
+                if (!OaFormSchemaValidator.COLUMN_TYPES.contains(columnType)) {
+                    continue;
+                }
+                try {
+                    row.put(columnKey, normalize(columnType, cell, column));
+                } catch (IllegalArgumentException e) {
+                    throw new IllegalArgumentException("第 " + rowNo + " 行" + columnLabel + e.getMessage());
+                }
+            }
+            rows.add(Collections.unmodifiableMap(row));
+            if (rows.size() > maxRows) {
+                throw new IllegalArgumentException("明细不能超过 " + maxRows + " 行");
+            }
+        }
+        return List.copyOf(rows);
     }
 
     private static String text(Object raw, int max, String message) {

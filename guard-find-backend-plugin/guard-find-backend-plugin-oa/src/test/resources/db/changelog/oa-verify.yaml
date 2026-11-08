@@ -33,3 +33,7 @@ databaseChangeLog:
       file: db/changelog/mysql/oa/oa_ops.sql
   - include:
       file: db/changelog/mysql/oa/oa_cc_manage.sql
+  - include:
+      file: db/changelog/mysql/oa/oa_leave.sql
+  - include:
+      file: db/changelog/mysql/oa/oa_expense.sql

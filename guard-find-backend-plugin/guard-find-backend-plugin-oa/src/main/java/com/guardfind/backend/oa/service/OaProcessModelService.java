@@ -18,6 +18,7 @@ package com.guardfind.backend.oa.service;
 
 import com.guardfind.backend.oa.bpmn.OaBpmnValidationResult;
 import com.guardfind.backend.oa.bpmn.OaBpmnValidator;
+import com.guardfind.backend.oa.business.OaBusinessHooks;
 import com.guardfind.backend.oa.launch.OaLaunchScope;
 import com.guardfind.backend.oa.model.OaProcessModelCreateReq;
 import com.guardfind.backend.oa.model.OaProcessModelResp;
@@ -59,17 +60,20 @@ public class OaProcessModelService {
     private final OaProcessModelRepository repository;
     private final OaBpmnValidator validator;
     private final OaAssigneeResolver assigneeResolver;
+    private final OaBusinessHooks businessHooks;
     private final RepositoryService repositoryService;
     private final TransactionTemplate transactionTemplate;
 
     public OaProcessModelService(OaProcessModelRepository repository,
                                  OaBpmnValidator validator,
                                  OaAssigneeResolver assigneeResolver,
+                                 OaBusinessHooks businessHooks,
                                  RepositoryService repositoryService,
                                  PlatformTransactionManager transactionManager) {
         this.repository = repository;
         this.validator = validator;
         this.assigneeResolver = assigneeResolver;
+        this.businessHooks = businessHooks;
         this.repositoryService = repositoryService;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
@@ -103,8 +107,11 @@ public class OaProcessModelService {
             throw new BusinessException("模型标识已存在");
         }
         try {
+            String businessType = req.businessType() == null || req.businessType().isBlank()
+                ? "GENERIC"
+                : req.businessType();
             long id = repository.insertModel(tenantId, req.modelKey(), req.name().trim(), req.category(), req
-                .description(), req.bpmnXml(), digestOrNull(req.bpmnXml()), userId, LocalDateTime.now());
+                .description(), businessType, req.bpmnXml(), digestOrNull(req.bpmnXml()), userId, LocalDateTime.now());
             return detail(tenantId, id);
         } catch (org.springframework.dao.DuplicateKeyException e) {
             throw new BusinessException("模型标识已存在");
@@ -165,6 +172,10 @@ public class OaProcessModelService {
         OaProcessModelRepository.FormVersion formVersion = repository.formVersion(tenantId, req.formVersionId());
         if (formVersion == null) {
             return OaProcessPublishResp.rejected(List.of("绑定的表单版本不存在或不属于当前租户"));
+        }
+        List<String> businessErrors = businessHooks.validateForm(model.businessType(), formVersion.schemaJson());
+        if (!businessErrors.isEmpty()) {
+            return OaProcessPublishResp.rejected(businessErrors);
         }
         try {
             validation.assignees().forEach(spec -> assigneeResolver.validateForPublish(spec, tenantId));

@@ -75,7 +75,7 @@ public class OaLaunchRepository {
         SELECT r.id AS release_id, r.model_id, m.model_key, m.name AS model_name, m.category, m.description,
                r.release_version, r.process_definition_key, v.form_id, r.form_version_id, r.form_version,
                f.name AS form_name, f.form_key, r.launch_scope, r.publish_time,
-               r.bpmn_xml, v.schema_json, v.schema_digest
+               r.bpmn_xml, v.schema_json, v.schema_digest, m.business_type
           FROM oa_process_release r
           JOIN oa_process_model m
             ON m.tenant_id = r.tenant_id AND m.id = r.model_id AND m.deleted = 0
@@ -100,7 +100,7 @@ public class OaLaunchRepository {
                 .getString("process_definition_key"), rs.getLong("form_id"), rs.getLong("form_version_id"), rs
                     .getInt("form_version"), rs.getString("form_name"), rs.getString("form_key"), rs
                         .getString("launch_scope"), timestamp(rs, "publish_time"), rs.getString("bpmn_xml"), rs
-                            .getString("schema_json"), rs.getString("schema_digest"));
+                            .getString("schema_json"), rs.getString("schema_digest"), rs.getString("business_type"));
 
     private static final RowMapper<OaApplicationResp> APPLICATION_MAPPER = (rs, rowNum) -> new OaApplicationResp(rs
         .getLong("id"), rs.getString("business_type"), rs.getString("business_key"), rs.getString("title"), rs
@@ -144,6 +144,17 @@ public class OaLaunchRepository {
         List<OaLaunchRelease> releases = jdbcTemplate
             .query(LAUNCH_RELEASE_SELECT, LAUNCH_RELEASE_MAPPER, tenantId, releaseId);
         return releases.isEmpty() ? null : releases.get(0);
+    }
+
+    public String applicationBusinessType(long tenantId, long applicationId) {
+        List<String> types = jdbcTemplate.queryForList("""
+            SELECT m.business_type
+              FROM oa_application a
+              JOIN oa_process_release r ON r.tenant_id = a.tenant_id AND r.id = a.release_id
+              JOIN oa_process_model m ON m.tenant_id = r.tenant_id AND m.id = r.model_id
+             WHERE a.tenant_id = ? AND a.id = ?
+            """, String.class, tenantId, applicationId);
+        return types.isEmpty() ? null : types.get(0);
     }
 
     public ApplicantProfile applicantProfile(long tenantId, long userId) {
@@ -550,7 +561,7 @@ public class OaLaunchRepository {
                                   String description, int releaseVersion, String processDefinitionKey, long formId,
                                   long formVersionId, int formVersion, String formName, String formKey,
                                   String launchScope, LocalDateTime publishTime, String bpmnXml, String schemaJson,
-                                  String schemaDigest) {
+                                  String schemaDigest, String businessType) {
     }
 
     public record ApplicantProfile(long userId, String name, Long deptId, String deptName, Set<String> roleCodes) {

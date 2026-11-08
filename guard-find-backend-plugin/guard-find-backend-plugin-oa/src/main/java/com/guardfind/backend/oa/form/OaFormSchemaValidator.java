@@ -32,7 +32,7 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
- * 表单 schema 校验：首版只放行八种字段类型，拒绝重复 key、非法选项与超限结构。
+ * 表单 schema 校验：放行九种字段类型（table 为明细表，列只允许基础类型），拒绝重复 key、非法选项与超限结构。
  *
  * <pre>
  * {"version":1,"fields":[
@@ -47,8 +47,14 @@ public class OaFormSchemaValidator {
     public static final int MAX_OPTIONS = 50;
     public static final int MAX_ERRORS = 40;
 
+    public static final int MAX_COLUMNS = 20;
+    public static final int MAX_TABLE_ROWS = 200;
+    public static final int DEFAULT_TABLE_ROWS = 50;
+
     public static final Set<String> FIELD_TYPES = Set
-        .of("text", "textarea", "number", "date", "radio", "checkbox", "attachment", "person");
+        .of("text", "textarea", "number", "date", "radio", "checkbox", "attachment", "person", "table");
+
+    public static final Set<String> COLUMN_TYPES = Set.of("text", "textarea", "number", "date", "radio");
 
     private static final Set<String> OPTION_TYPES = Set.of("radio", "checkbox");
     private static final Pattern FIELD_KEY = Pattern.compile("^[A-Za-z][A-Za-z0-9_]{0,63}$");
@@ -147,7 +153,56 @@ public class OaFormSchemaValidator {
         if (OPTION_TYPES.contains(type)) {
             validateOptions(field.get("options"), prefix, errors);
         }
+        if ("table".equals(type)) {
+            validateColumns(field, prefix, errors);
+        }
         return !hidden;
+    }
+
+    private void validateColumns(JsonNode field, String prefix, List<String> errors) {
+        JsonNode maxRows = field.get("maxRows");
+        if (maxRows != null && !maxRows.isNull() && (!maxRows.canConvertToInt() || !maxRows
+            .isIntegralNumber() || maxRows.asInt() < 1 || maxRows.asInt() > MAX_TABLE_ROWS)) {
+            errors.add(prefix + "的 maxRows 必须是 1~" + MAX_TABLE_ROWS + " 的整数");
+        }
+        JsonNode columns = field.get("columns");
+        if (columns == null || !columns.isArray() || columns.isEmpty()) {
+            errors.add(prefix + "至少需要一列");
+            return;
+        }
+        if (columns.size() > MAX_COLUMNS) {
+            errors.add(prefix + "的列不能超过 " + MAX_COLUMNS + " 个");
+        }
+        Set<String> keys = new HashSet<>();
+        for (int index = 0; index < columns.size(); index++) {
+            JsonNode column = columns.get(index);
+            String columnPrefix = prefix + "第 " + (index + 1) + " 列";
+            if (column == null || !column.isObject()) {
+                errors.add(columnPrefix + "必须是对象");
+                continue;
+            }
+            String key = text(column, "key");
+            if (key.isBlank()) {
+                errors.add(columnPrefix + "缺少 key");
+            } else if (!FIELD_KEY.matcher(key).matches()) {
+                errors.add(columnPrefix + "的 key 只能包含字母、数字和下划线，且以字母开头: " + key);
+            } else if (!keys.add(key)) {
+                errors.add(prefix + "的列 key 重复: " + key);
+            }
+            String label = text(column, "label");
+            if (label.isBlank()) {
+                errors.add(columnPrefix + "缺少 label");
+            } else if (label.length() > 100) {
+                errors.add(columnPrefix + "的 label 不能超过 100 个字符");
+            }
+            flag(column, "required", columnPrefix, errors);
+            String type = text(column, "type");
+            if (!COLUMN_TYPES.contains(type)) {
+                errors.add(columnPrefix + "的类型不支持: " + (type.isBlank() ? "(空)" : type));
+            } else if ("radio".equals(type)) {
+                validateOptions(column.get("options"), columnPrefix, errors);
+            }
+        }
     }
 
     private static boolean flag(JsonNode field, String name, String prefix, List<String> errors) {

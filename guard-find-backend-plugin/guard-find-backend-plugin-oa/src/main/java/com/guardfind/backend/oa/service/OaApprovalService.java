@@ -17,6 +17,7 @@
 package com.guardfind.backend.oa.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.guardfind.backend.oa.business.OaBusinessHooks;
 import com.guardfind.backend.oa.engine.OaApprovalEngine;
 import com.guardfind.backend.oa.model.OaApplicationDetailResp;
 import com.guardfind.backend.oa.model.OaApprovalActionReq;
@@ -86,6 +87,7 @@ public class OaApprovalService {
     private final OaApprovalEngine engine;
     private final OaOutboxService outboxService;
     private final OaCcService ccService;
+    private final OaBusinessHooks businessHooks;
     private final ObjectMapper objectMapper;
     private final TransactionTemplate transactionTemplate;
 
@@ -96,6 +98,7 @@ public class OaApprovalService {
                              OaApprovalEngine engine,
                              OaOutboxService outboxService,
                              OaCcService ccService,
+                             OaBusinessHooks businessHooks,
                              ObjectMapper objectMapper,
                              PlatformTransactionManager transactionManager) {
         this.approvalRepository = approvalRepository;
@@ -105,6 +108,7 @@ public class OaApprovalService {
         this.engine = engine;
         this.outboxService = outboxService;
         this.ccService = ccService;
+        this.businessHooks = businessHooks;
         this.objectMapper = objectMapper;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
@@ -701,6 +705,7 @@ public class OaApprovalService {
         if (approvalRepository.updateStatus(tenantId, applicationId, "RUNNING", status, now, userId, now) != 1) {
             throw new BusinessException("申请状态已变化，请刷新后重试");
         }
+        businessHooks.finished(tenantId, applicationId, status, userId, now);
     }
 
     private String operatorName(long tenantId, long userId) {

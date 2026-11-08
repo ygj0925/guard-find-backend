@@ -24,5 +24,5 @@ import java.time.LocalDateTime;
 public record OaProcessModelResp(Long id, String modelKey, String name, String category, String description,
                                  String bpmnXml, String xmlDigest, String status, Long currentReleaseId,
                                  Integer currentReleaseVersion, Long formId, Long formVersionId, Integer version,
-                                 LocalDateTime createTime, LocalDateTime updateTime) {
+                                 LocalDateTime createTime, LocalDateTime updateTime, String businessType) {
 }

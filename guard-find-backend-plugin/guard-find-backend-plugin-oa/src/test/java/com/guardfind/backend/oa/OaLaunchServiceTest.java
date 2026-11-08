@@ -18,6 +18,7 @@ package com.guardfind.backend.oa;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.guardfind.backend.oa.bpmn.OaBpmnValidator;
+import com.guardfind.backend.oa.business.OaBusinessHooks;
 import com.guardfind.backend.oa.config.OaFlowableConfiguration;
 import com.guardfind.backend.oa.engine.OaApprovalEngine;
 import com.guardfind.backend.oa.engine.OaEngineTemplate;
@@ -115,6 +116,7 @@ class OaLaunchServiceTest {
             Fixture fixture = fixture(context, BPMN);
             OaLaunchDetailResp detail = fixture.launchService.detail(TENANT, 101, 10);
             assertThat(detail.launchable()).isTrue();
+            assertThat(detail.businessType()).isEqualTo("GENERIC");
             assertThat(detail.assigneeVariables()).hasSize(1);
             assertThat(detail.assigneeVariables().get(0).name()).isEqualTo("approver");
             assertThat(detail.assigneeVariables().get(0).suggestedType()).isEqualTo("FORM_FIELD");
@@ -564,8 +566,8 @@ class OaLaunchServiceTest {
         OaOutboxService outboxService = new OaOutboxService(new OaOutboxRepository(jdbc), new ObjectMapper());
         OaCcService ccService = new OaCcService(new OaCcRepository(jdbc), repository, outboxService);
         OaLaunchService launchService = new OaLaunchService(repository, new OaBpmnValidator(List
-            .of()), new OaFormValueValidator(), attachmentService, launcher, approvalEngine, outboxService, ccService, new OaDraftRepository(jdbc), new ObjectMapper(), context
-                .getBean(PlatformTransactionManager.class));
+            .of()), new OaFormValueValidator(), attachmentService, launcher, approvalEngine, outboxService, ccService, new OaDraftRepository(jdbc), new OaBusinessHooks(List
+                .of(), repository), new ObjectMapper(), context.getBean(PlatformTransactionManager.class));
         OaDraftService draftService = new OaDraftService(new OaDraftRepository(jdbc), repository, launchService, new ObjectMapper());
         OaApplicationService applicationService = new OaApplicationService(repository);
         return new Fixture(jdbc, launchService, applicationService, attachmentService, ccService, draftService, context
@@ -620,7 +622,7 @@ class OaLaunchServiceTest {
         jdbc.execute("""
             CREATE TABLE oa_process_model (
               id BIGINT PRIMARY KEY, tenant_id BIGINT NOT NULL, model_key VARCHAR(64) NOT NULL,
-              name VARCHAR(100) NOT NULL, category VARCHAR(64), description VARCHAR(500), status VARCHAR(20) NOT NULL,
+              name VARCHAR(100) NOT NULL, category VARCHAR(64), description VARCHAR(500), status VARCHAR(20) NOT NULL, business_type VARCHAR(32) NOT NULL DEFAULT 'GENERIC',
               current_release_id BIGINT, current_release_version INT NOT NULL DEFAULT 0, form_id BIGINT,
               form_version_id BIGINT, version INT NOT NULL DEFAULT 0, create_user BIGINT NOT NULL,
               create_time TIMESTAMP NOT NULL, update_user BIGINT, update_time TIMESTAMP,

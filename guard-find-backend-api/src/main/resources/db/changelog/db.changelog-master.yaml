@@ -108,3 +108,13 @@ databaseChangeLog:
   # OA 审批中追加抄送与抄送撤销
   - include:
       file: classpath:db/changelog/mysql/oa/oa_cc_manage.sql
+  # OA 请假试点：业务类型、假期类型/日历/余额/台账与菜单
+  - include:
+      file: classpath:db/changelog/mysql/oa/oa_leave.sql
+  - include:
+      file: classpath:db/changelog/mysql/oa/oa_leave_menu.sql
+  # OA 报销试点：费用类型、报销单/明细、发票占用与菜单
+  - include:
+      file: classpath:db/changelog/mysql/oa/oa_expense.sql
+  - include:
+      file: classpath:db/changelog/mysql/oa/oa_expense_menu.sql

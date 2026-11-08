@@ -25,7 +25,7 @@ public record OaLaunchDetailResp(long releaseId, long modelId, String modelKey, 
                                  String description, int releaseVersion, String processDefinitionKey, long formId,
                                  long formVersionId, int formVersion, String formName, String formKey,
                                  String schemaJson, String schemaDigest, String launchScope, boolean launchable,
-                                 List<OaAssigneeVariableResp> assigneeVariables) {
+                                 List<OaAssigneeVariableResp> assigneeVariables, String businessType) {
 
     public OaLaunchDetailResp {
         assigneeVariables = assigneeVariables == null ? List.of() : List.copyOf(assigneeVariables);

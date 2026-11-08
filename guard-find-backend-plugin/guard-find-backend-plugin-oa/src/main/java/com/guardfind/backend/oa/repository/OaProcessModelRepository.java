@@ -43,14 +43,14 @@ public class OaProcessModelRepository {
     private static final String MODEL_COLUMNS = """
         id, model_key, name, category, description, bpmn_xml, xml_digest, status,
         current_release_id, current_release_version, form_id, form_version_id,
-        version, create_time, update_time
+        version, create_time, update_time, business_type
         """;
 
     /** 列表不读取 bpmn_xml，避免分页响应携带完整 XML。 */
     private static final String MODEL_LIST_COLUMNS = """
         id, model_key, name, category, description, NULL AS bpmn_xml, xml_digest, status,
         current_release_id, current_release_version, form_id, form_version_id,
-        version, create_time, update_time
+        version, create_time, update_time, business_type
         """;
 
     private static final RowMapper<OaProcessModelResp> MODEL_MAPPER = (rs, rowNum) -> new OaProcessModelResp(rs
@@ -61,7 +61,7 @@ public class OaProcessModelRepository {
                         .getObject("form_version_id")), rs.getInt("version"), rs.getTimestamp("create_time")
                             .toLocalDateTime(), rs.getTimestamp("update_time") == null
                                 ? null
-                                : rs.getTimestamp("update_time").toLocalDateTime());
+                                : rs.getTimestamp("update_time").toLocalDateTime(), rs.getString("business_type"));
 
     private static final RowMapper<OaProcessReleaseResp> RELEASE_MAPPER = (rs, rowNum) -> new OaProcessReleaseResp(rs
         .getLong("id"), rs.getInt("release_version"), rs.getString("engine_definition_id"), rs
@@ -122,6 +122,7 @@ public class OaProcessModelRepository {
                             String name,
                             String category,
                             String description,
+                            String businessType,
                             String bpmnXml,
                             String xmlDigest,
                             long userId,
@@ -130,19 +131,20 @@ public class OaProcessModelRepository {
         jdbcTemplate.update(connection -> {
             PreparedStatement ps = connection.prepareStatement("""
                 INSERT INTO oa_process_model
-                  (tenant_id, model_key, name, category, description, bpmn_xml, xml_digest, status,
+                  (tenant_id, model_key, name, category, business_type, description, bpmn_xml, xml_digest, status,
                    current_release_version, version, create_user, create_time, deleted)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'DRAFT', 0, 0, ?, ?, 0)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT', 0, 0, ?, ?, 0)
                 """, Statement.RETURN_GENERATED_KEYS);
             ps.setLong(1, tenantId);
             ps.setString(2, modelKey);
             ps.setString(3, name);
             ps.setString(4, blankToNull(category));
-            ps.setString(5, blankToNull(description));
-            ps.setString(6, blankToNull(bpmnXml));
-            ps.setString(7, xmlDigest);
-            ps.setLong(8, userId);
-            ps.setObject(9, now);
+            ps.setString(5, businessType);
+            ps.setString(6, blankToNull(description));
+            ps.setString(7, blankToNull(bpmnXml));
+            ps.setString(8, xmlDigest);
+            ps.setLong(9, userId);
+            ps.setObject(10, now);
             return ps;
         }, keyHolder);
         return requireKey(keyHolder);
@@ -294,8 +296,9 @@ public class OaProcessModelRepository {
 
     public FormVersion formVersion(long tenantId, long formVersionId) {
         List<FormVersion> versions = jdbcTemplate.query("""
-            SELECT form_id, version FROM oa_form_version WHERE tenant_id = ? AND id = ?
-            """, (rs, rowNum) -> new FormVersion(rs.getLong("form_id"), rs.getInt("version")), tenantId, formVersionId);
+            SELECT form_id, version, schema_json FROM oa_form_version WHERE tenant_id = ? AND id = ?
+            """, (rs, rowNum) -> new FormVersion(rs.getLong("form_id"), rs.getInt("version"), rs
+            .getString("schema_json")), tenantId, formVersionId);
         return versions.isEmpty() ? null : versions.get(0);
     }
 
@@ -328,6 +331,6 @@ public class OaProcessModelRepository {
         return key.longValue();
     }
 
-    public record FormVersion(long formId, int version) {
+    public record FormVersion(long formId, int version, String schemaJson) {
     }
 }

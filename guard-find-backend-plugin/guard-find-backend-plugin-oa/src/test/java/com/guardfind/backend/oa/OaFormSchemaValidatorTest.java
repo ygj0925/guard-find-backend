@@ -17,8 +17,13 @@
 package com.guardfind.backend.oa;
 
 import com.guardfind.backend.oa.form.OaFormSchemaValidator;
+import com.guardfind.backend.oa.form.OaFormValueValidator;
 import com.guardfind.backend.oa.model.OaFormValidationResult;
 import org.junit.jupiter.api.Test;
+
+import java.math.BigDecimal;
+import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -162,5 +167,69 @@ class OaFormSchemaValidatorTest {
         OaFormValidationResult publish = validator.validate(schema, true);
         assertThat(publish.valid()).isFalse();
         assertThat(publish.errors()).contains("表单至少需要一个可见字段才能发布");
+    }
+
+    @Test
+    void acceptsTableFieldAndRejectsBadColumns() {
+        String ok = """
+            {"fields":[{"id":"f1","key":"items","label":"明细","type":"table","maxRows":10,"columns":[
+              {"key":"category","label":"类别","type":"radio","required":true,"options":[{"label":"交通","value":"TRAFFIC"}]},
+              {"key":"amount","label":"金额","type":"number","required":true},
+              {"key":"day","label":"日期","type":"date"}
+            ]}]}
+            """;
+        assertThat(validator.validate(ok, true).valid()).isTrue();
+
+        String bad = """
+            {"fields":[
+              {"id":"f1","key":"empty","label":"空明细","type":"table"},
+              {"id":"f2","key":"items","label":"明细","type":"table","maxRows":500,"columns":[
+                {"key":"amount","label":"金额","type":"number"},
+                {"key":"amount","label":"金额2","type":"number"},
+                {"key":"files","label":"附件","type":"attachment"},
+                {"key":"kind","label":"类别","type":"radio"}
+              ]}
+            ]}
+            """;
+        OaFormValidationResult result = validator.validate(bad, true);
+        assertThat(result.valid()).isFalse();
+        assertThat(result.errors()).anyMatch(error -> error.contains("至少需要一列"))
+            .anyMatch(error -> error.contains("maxRows"))
+            .anyMatch(error -> error.contains("列 key 重复: amount"))
+            .anyMatch(error -> error.contains("第 3 列的类型不支持: attachment"))
+            .anyMatch(error -> error.contains("第 4 列至少需要一个选项"));
+    }
+
+    @Test
+    void normalizesTableRowsAndReportsRowErrors() {
+        String schema = """
+            {"fields":[{"id":"f1","key":"items","label":"明细","type":"table","required":true,"maxRows":2,"columns":[
+              {"key":"category","label":"类别","type":"radio","required":true,"options":[{"label":"交通","value":"TRAFFIC"}]},
+              {"key":"amount","label":"金额","type":"number","required":true},
+              {"key":"day","label":"日期","type":"date"}
+            ]}]}
+            """;
+        OaFormValueValidator values = new OaFormValueValidator();
+
+        var ok = values.validate(schema, Map.of("items", List.of(Map
+            .of("category", "TRAFFIC", "amount", "12.50", "extra", "x"), Map.of("category", "", "amount", ""))));
+        assertThat(ok.valid()).isTrue();
+        @SuppressWarnings("unchecked") List<Map<String, Object>> rows = (List<Map<String, Object>>)ok.normalized()
+            .get("items");
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0)).containsEntry("category", "TRAFFIC")
+            .containsEntry("amount", new BigDecimal("12.50"))
+            .doesNotContainKey("extra");
+
+        assertThat(values.validate(schema, Map.of("items", List.of(Map.of("category", "", "amount", "")))).errors())
+            .containsEntry("items", "请填写明细");
+        assertThat(values.validate(schema, Map.of("items", List.of(Map.of("category", "TRAFFIC")))).errors())
+            .containsEntry("items", "第 1 行请填写金额");
+        assertThat(values.validate(schema, Map.of("items", List.of(Map.of("category", "BUS", "amount", 1)))).errors())
+            .containsEntry("items", "第 1 行类别请选择有效选项");
+        assertThat(values.validate(schema, Map.of("items", List.of(Map.of("category", "TRAFFIC", "amount", 1), Map
+            .of("category", "TRAFFIC", "amount", 2), Map.of("category", "TRAFFIC", "amount", 3)))).errors())
+            .containsEntry("items", "明细不能超过 2 行");
+        assertThat(values.validate(schema, Map.of("items", "not-a-list")).errors()).containsEntry("items", "明细必须是行数组");
     }
 }

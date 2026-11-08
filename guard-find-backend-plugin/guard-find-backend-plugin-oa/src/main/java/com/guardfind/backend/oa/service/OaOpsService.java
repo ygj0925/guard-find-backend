@@ -17,6 +17,7 @@
 package com.guardfind.backend.oa.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.guardfind.backend.oa.business.OaBusinessHooks;
 import com.guardfind.backend.oa.engine.OaApprovalEngine;
 import com.guardfind.backend.oa.model.OaApprovalActionResp;
 import com.guardfind.backend.oa.model.OaOpsTerminateReq;
@@ -56,6 +57,7 @@ public class OaOpsService {
     private final OaOutboxDispatcher dispatcher;
     private final OaOutboxService outboxService;
     private final OaApprovalEngine engine;
+    private final OaBusinessHooks businessHooks;
     private final ObjectMapper objectMapper;
     private final TransactionTemplate transactionTemplate;
 
@@ -64,6 +66,7 @@ public class OaOpsService {
                         OaOutboxDispatcher dispatcher,
                         OaOutboxService outboxService,
                         OaApprovalEngine engine,
+                        OaBusinessHooks businessHooks,
                         ObjectMapper objectMapper,
                         PlatformTransactionManager transactionManager) {
         this.approvalRepository = approvalRepository;
@@ -71,6 +74,7 @@ public class OaOpsService {
         this.dispatcher = dispatcher;
         this.outboxService = outboxService;
         this.engine = engine;
+        this.businessHooks = businessHooks;
         this.objectMapper = objectMapper;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
@@ -128,6 +132,7 @@ public class OaOpsService {
         if (approvalRepository.updateStatus(tenantId, applicationId, "RUNNING", "CANCELLED", now, actorId, now) != 1) {
             throw new BusinessException("申请状态已变化，请刷新后重试");
         }
+        businessHooks.finished(tenantId, applicationId, "CANCELLED", actorId, now);
         Map<String, Object> detail = new LinkedHashMap<>();
         detail.put("requestId", requestId);
         detail.put("applicationStatus", "CANCELLED");
