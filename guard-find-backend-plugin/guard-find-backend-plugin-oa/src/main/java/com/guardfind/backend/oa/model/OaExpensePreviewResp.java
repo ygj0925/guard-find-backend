@@ -21,5 +21,6 @@ import java.math.BigDecimal;
 /**
  * 发起前试算：totalAmount 为服务端合计；message 非空表示不可提交的原因。
  */
-public record OaExpensePreviewResp(BigDecimal totalAmount, int itemCount, String message) {
+public record OaExpensePreviewResp(BigDecimal totalAmount, int itemCount, String message, boolean overBudget,
+                                   String budgetHint) {
 }

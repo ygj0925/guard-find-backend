@@ -21,5 +21,6 @@ import java.util.List;
 /**
  * 报销单详情：主单与明细。
  */
-public record OaExpenseDetailResp(OaExpenseResp expense, List<OaExpenseItemResp> items) {
+public record OaExpenseDetailResp(OaExpenseResp expense, List<OaExpenseItemResp> items,
+                                  List<OaLoanLedgerResp> writeOffs) {
 }

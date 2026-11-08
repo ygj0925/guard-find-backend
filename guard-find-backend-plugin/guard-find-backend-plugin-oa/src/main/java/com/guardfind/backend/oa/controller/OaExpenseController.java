@@ -138,7 +138,7 @@ public class OaExpenseController {
     @SaCheckPermission(value = {"system:oa:expense:mine", "system:oa:launch:list"}, mode = SaMode.OR)
     @PostMapping("/preview")
     public OaExpensePreviewResp preview(@RequestBody(required = false) Map<String, Object> formData) {
-        return service.preview(tenantId(), formData);
+        return service.preview(tenantId(), userId(), formData);
     }
 
     private static long tenantId() {

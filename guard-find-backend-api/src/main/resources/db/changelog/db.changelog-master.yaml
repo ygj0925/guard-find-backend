@@ -118,3 +118,8 @@ databaseChangeLog:
       file: classpath:db/changelog/mysql/oa/oa_expense.sql
   - include:
       file: classpath:db/changelog/mysql/oa/oa_expense_menu.sql
+  # OA 出差借款：出差单/借款单/借款流水、报销关联出差与核销、菜单
+  - include:
+      file: classpath:db/changelog/mysql/oa/oa_travel.sql
+  - include:
+      file: classpath:db/changelog/mysql/oa/oa_travel_menu.sql

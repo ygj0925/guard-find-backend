@@ -24,8 +24,8 @@ import java.time.LocalDateTime;
  * 报销单列表行：status 为报销单状态（APPROVING/PENDING_PAYMENT/PAID/CLOSED），applicationStatus 为审批状态。
  */
 public record OaExpenseResp(long id, long applicationId, String title, String applicationStatus, long applicantId,
-                            String applicantName, BigDecimal totalAmount, int itemCount, String status,
-                            BigDecimal paidAmount, LocalDate payDate, String payMethod, String payReference,
-                            String payRemark, Long payerId, String payerName, LocalDateTime paidTime,
-                            LocalDateTime createTime) {
+                            String applicantName, BigDecimal totalAmount, int itemCount, String status, Long travelId,
+                            String travelNo, boolean overBudget, BigDecimal writeOffAmount, BigDecimal paidAmount,
+                            LocalDate payDate, String payMethod, String payReference, String payRemark, Long payerId,
+                            String payerName, LocalDateTime paidTime, LocalDateTime createTime) {
 }

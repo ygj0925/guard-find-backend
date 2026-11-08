@@ -64,23 +64,25 @@ public class OaExpenseRepository {
           JOIN oa_application a ON a.tenant_id = e.tenant_id AND a.id = e.application_id
           LEFT JOIN sys_user u ON u.tenant_id = e.tenant_id AND u.id = e.applicant_id
           LEFT JOIN sys_user p ON p.tenant_id = e.tenant_id AND p.id = e.payer_id
+          LEFT JOIN oa_travel t ON t.tenant_id = e.tenant_id AND t.id = e.travel_id
          WHERE e.tenant_id = ?
         """;
 
     private static final String RECORD_SELECT = """
         SELECT e.id, e.application_id, a.title, a.status AS application_status, e.applicant_id,
                COALESCE(NULLIF(u.nickname, ''), u.username) AS applicant_name, e.total_amount, e.item_count,
-               e.status, e.paid_amount, e.pay_date, e.pay_method, e.pay_reference, e.pay_remark, e.payer_id,
+               e.status, e.travel_id, t.travel_no, e.over_budget, e.write_off_amount, e.paid_amount, e.pay_date, e.pay_method, e.pay_reference, e.pay_remark, e.payer_id,
                COALESCE(NULLIF(p.nickname, ''), p.username) AS payer_name, e.paid_time, e.create_time
         """ + RECORD_FROM;
 
     private static final RowMapper<OaExpenseResp> RECORD_MAPPER = (rs, rowNum) -> new OaExpenseResp(rs.getLong("id"), rs
         .getLong("application_id"), rs.getString("title"), rs.getString("application_status"), rs
             .getLong("applicant_id"), rs.getString("applicant_name"), rs.getBigDecimal("total_amount"), rs
-                .getInt("item_count"), rs.getString("status"), rs.getBigDecimal("paid_amount"), date(rs, "pay_date"), rs
-                    .getString("pay_method"), rs.getString("pay_reference"), rs
-                        .getString("pay_remark"), nullableLong(rs, "payer_id"), rs
-                            .getString("payer_name"), timestamp(rs, "paid_time"), timestamp(rs, "create_time"));
+                .getInt("item_count"), rs.getString("status"), nullableLong(rs, "travel_id"), rs
+                    .getString("travel_no"), rs.getBoolean("over_budget"), rs.getBigDecimal("write_off_amount"), rs
+                        .getBigDecimal("paid_amount"), date(rs, "pay_date"), rs.getString("pay_method"), rs
+                            .getString("pay_reference"), rs.getString("pay_remark"), nullableLong(rs, "payer_id"), rs
+                                .getString("payer_name"), timestamp(rs, "paid_time"), timestamp(rs, "create_time"));
 
     private static final RowMapper<ExpenseRow> EXPENSE_ROW_MAPPER = (rs, rowNum) -> new ExpenseRow(rs.getLong("id"), rs
         .getLong("application_id"), rs.getLong("applicant_id"), rs.getBigDecimal("total_amount"), rs
@@ -182,22 +184,27 @@ public class OaExpenseRepository {
                               long applicantId,
                               BigDecimal totalAmount,
                               int itemCount,
+                              Long travelId,
+                              boolean overBudget,
                               String status,
                               LocalDateTime now) {
         KeyHolder keyHolder = new GeneratedKeyHolder();
         jdbcTemplate.update(connection -> {
             PreparedStatement ps = connection.prepareStatement("""
                 INSERT INTO oa_expense
-                  (tenant_id, application_id, applicant_id, total_amount, item_count, status, create_time)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                  (tenant_id, application_id, applicant_id, total_amount, item_count, travel_id, over_budget, status,
+                   create_time)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, Statement.RETURN_GENERATED_KEYS);
             ps.setLong(1, tenantId);
             ps.setLong(2, applicationId);
             ps.setLong(3, applicantId);
             ps.setBigDecimal(4, totalAmount);
             ps.setInt(5, itemCount);
-            ps.setString(6, status);
-            ps.setObject(7, now);
+            ps.setObject(6, travelId);
+            ps.setBoolean(7, overBudget);
+            ps.setString(8, status);
+            ps.setObject(9, now);
             return ps;
         }, keyHolder);
         return requireKey(keyHolder);
@@ -252,18 +259,21 @@ public class OaExpenseRepository {
     public int markPaid(long tenantId,
                         long id,
                         BigDecimal paidAmount,
+                        BigDecimal writeOffAmount,
                         LocalDate payDate,
                         String payMethod,
                         String payReference,
                         String remark,
                         long payerId,
                         LocalDateTime now) {
-        return jdbcTemplate.update("""
-            UPDATE oa_expense
-               SET status = 'PAID', paid_amount = ?, pay_date = ?, pay_method = ?, pay_reference = ?, pay_remark = ?,
-                   payer_id = ?, paid_time = ?, update_time = ?
-             WHERE tenant_id = ? AND id = ? AND status = 'PENDING_PAYMENT'
-            """, paidAmount, Date.valueOf(payDate), payMethod, payReference, remark, payerId, now, now, tenantId, id);
+        return jdbcTemplate
+            .update("""
+                UPDATE oa_expense
+                   SET status = 'PAID', paid_amount = ?, write_off_amount = ?, pay_date = ?, pay_method = ?, pay_reference = ?, pay_remark = ?,
+                       payer_id = ?, paid_time = ?, update_time = ?
+                 WHERE tenant_id = ? AND id = ? AND status = 'PENDING_PAYMENT'
+                """, paidAmount, writeOffAmount, Date
+                .valueOf(payDate), payMethod, payReference, remark, payerId, now, now, tenantId, id);
     }
 
     public List<OaExpenseResp> records(long tenantId,
@@ -289,6 +299,11 @@ public class OaExpenseRepository {
         appendFilters(sql, args, status, keyword, applicantId);
         Long count = jdbcTemplate.queryForObject(sql.toString(), Long.class, args.toArray());
         return count == null ? 0 : count;
+    }
+
+    public List<OaExpenseResp> recordsByTravel(long tenantId, long travelId) {
+        return jdbcTemplate
+            .query(RECORD_SELECT + " AND e.travel_id = ? ORDER BY e.id DESC", RECORD_MAPPER, tenantId, travelId);
     }
 
     public OaExpenseResp record(long tenantId, long id) {

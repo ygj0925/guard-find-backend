@@ -25,6 +25,7 @@ import com.guardfind.backend.oa.model.OaExpensePayReq;
 import com.guardfind.backend.oa.model.OaExpensePreviewResp;
 import com.guardfind.backend.oa.model.OaExpenseResp;
 import com.guardfind.backend.oa.model.OaExpenseTemplateResp;
+import com.guardfind.backend.oa.model.OaExpenseWriteOffReq;
 import com.guardfind.backend.oa.model.OaFormCreateReq;
 import com.guardfind.backend.oa.model.OaFormPublishResp;
 import com.guardfind.backend.oa.model.OaFormResp;
@@ -32,6 +33,9 @@ import com.guardfind.backend.oa.model.OaProcessModelCreateReq;
 import com.guardfind.backend.oa.model.OaProcessModelResp;
 import com.guardfind.backend.oa.repository.OaExpenseRepository;
 import com.guardfind.backend.oa.repository.OaExpenseRepository.ExpenseRow;
+import com.guardfind.backend.oa.repository.OaTravelRepository;
+import com.guardfind.backend.oa.repository.OaTravelRepository.LoanRow;
+import com.guardfind.backend.oa.travel.OaLoanHook;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -42,6 +46,8 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -56,10 +62,12 @@ public class OaExpenseService {
     public static final String TEMPLATE_FORM_KEY = "expense_claim";
     public static final String TEMPLATE_MODEL_KEY = "expense_pilot";
     public static final String EVENT_EXPENSE_PAID = "EXPENSE_PAID";
+    public static final String LEDGER_WRITE_OFF = "WRITE_OFF";
     private static final Set<String> STATUSES = Set
         .of(OaExpenseHook.STATUS_APPROVING, OaExpenseHook.STATUS_PENDING_PAYMENT, OaExpenseHook.STATUS_PAID, OaExpenseHook.STATUS_CLOSED);
 
     private final OaExpenseRepository repository;
+    private final OaTravelRepository travelRepository;
     private final OaExpenseHook hook;
     private final OaFormService formService;
     private final OaProcessModelService modelService;
@@ -68,6 +76,7 @@ public class OaExpenseService {
     private final TransactionTemplate transactionTemplate;
 
     public OaExpenseService(OaExpenseRepository repository,
+                            OaTravelRepository travelRepository,
                             OaExpenseHook hook,
                             OaFormService formService,
                             OaProcessModelService modelService,
@@ -75,6 +84,7 @@ public class OaExpenseService {
                             ObjectMapper objectMapper,
                             PlatformTransactionManager transactionManager) {
         this.repository = repository;
+        this.travelRepository = travelRepository;
         this.hook = hook;
         this.formService = formService;
         this.modelService = modelService;
@@ -137,7 +147,8 @@ public class OaExpenseService {
         if (expense == null) {
             throw new BusinessException("报销单不存在");
         }
-        return new OaExpenseDetailResp(expense, repository.items(tenantId, id));
+        return new OaExpenseDetailResp(expense, repository.items(tenantId, id), travelRepository
+            .writeOffs(tenantId, id));
     }
 
     public OaExpenseDetailResp myDetail(long tenantId, long userId, long id) {
@@ -149,7 +160,8 @@ public class OaExpenseService {
     }
 
     /**
-     * 财务登记支付：只允许待支付状态、非本人报销且实付金额等于合计；与审批通过分离，不回写流程。
+     * 财务登记支付：只允许待支付状态、非本人报销；可用报销冲抵申请人未还借款，
+     * 实付金额必须等于合计减去核销金额。与审批通过分离，不回写流程。
      */
     public OaExpenseResp pay(long tenantId, long operatorId, long id, OaExpensePayReq req) {
         if (req.payDate().isAfter(LocalDate.now())) {
@@ -172,13 +184,37 @@ public class OaExpenseService {
             if (expense.applicantId() == operatorId) {
                 throw new BusinessException("不能为本人的报销登记支付");
             }
-            if (req.paidAmount().compareTo(expense.totalAmount()) != 0) {
-                throw new BusinessException("实付金额 " + plain(req.paidAmount()) + " 元与报销合计 " + plain(expense
-                    .totalAmount()) + " 元不一致");
+            List<OaExpenseWriteOffReq> writeOffs = req.writeOffs() == null ? List.of() : req.writeOffs();
+            BigDecimal writeOffTotal = BigDecimal.ZERO;
+            Set<Long> loanIds = new HashSet<>();
+            for (OaExpenseWriteOffReq writeOff : writeOffs) {
+                if (!loanIds.add(writeOff.loanId())) {
+                    throw new BusinessException("同一笔借款不能重复核销");
+                }
+                if (writeOff.amount().stripTrailingZeros().scale() > 2) {
+                    throw new BusinessException("核销金额最多两位小数");
+                }
+                writeOffTotal = writeOffTotal.add(writeOff.amount());
+            }
+            if (writeOffTotal.compareTo(expense.totalAmount()) > 0) {
+                throw new BusinessException("核销合计 " + plain(writeOffTotal) + " 元超过报销合计 " + plain(expense
+                    .totalAmount()) + " 元");
+            }
+            BigDecimal payable = expense.totalAmount().subtract(writeOffTotal);
+            if (req.paidAmount().compareTo(payable) != 0) {
+                throw new BusinessException(writeOffs.isEmpty()
+                    ? "实付金额 " + plain(req.paidAmount()) + " 元与报销合计 " + plain(expense.totalAmount()) + " 元不一致"
+                    : "实付金额 " + plain(req.paidAmount()) + " 元应等于报销合计 " + plain(expense
+                        .totalAmount()) + " 元减核销 " + plain(writeOffTotal) + " 元");
             }
             LocalDateTime now = LocalDateTime.now();
-            if (repository.markPaid(tenantId, id, req.paidAmount(), req.payDate(), req.payMethod(), blankToNull(req
-                .payReference()), blankToNull(req.remark()), operatorId, now) != 1) {
+            List<OaExpenseWriteOffReq> ordered = new ArrayList<>(writeOffs);
+            ordered.sort(Comparator.comparing(OaExpenseWriteOffReq::loanId));
+            for (OaExpenseWriteOffReq writeOff : ordered) {
+                writeOff(tenantId, operatorId, expense, writeOff, req.payDate(), now);
+            }
+            if (repository.markPaid(tenantId, id, req.paidAmount(), writeOffTotal.setScale(2), req.payDate(), req
+                .payMethod(), blankToNull(req.payReference()), blankToNull(req.remark()), operatorId, now) != 1) {
                 throw new BusinessException("报销单状态已变化，请刷新后重试");
             }
             OaExpenseResp paid = repository.record(tenantId, id);
@@ -190,8 +226,38 @@ public class OaExpenseService {
         });
     }
 
-    public OaExpensePreviewResp preview(long tenantId, Map<String, Object> formData) {
-        return hook.preview(tenantId, formData == null ? Map.of() : formData);
+    public OaExpensePreviewResp preview(long tenantId, long applicantId, Map<String, Object> formData) {
+        return hook.preview(tenantId, applicantId, formData == null ? Map.of() : formData);
+    }
+
+    private void writeOff(long tenantId,
+                          long operatorId,
+                          ExpenseRow expense,
+                          OaExpenseWriteOffReq req,
+                          LocalDate bizDate,
+                          LocalDateTime now) {
+        LoanRow loan = travelRepository.lockLoan(tenantId, req.loanId());
+        if (loan == null || loan.applicantId() != expense.applicantId()) {
+            throw new BusinessException("借款 " + req.loanId() + " 不存在或不属于报销申请人");
+        }
+        if (!OaLoanHook.STATUS_OUTSTANDING.equals(loan.status())) {
+            throw new BusinessException("借款 " + req.loanId() + " 不是待还款状态，不能核销");
+        }
+        BigDecimal amount = req.amount().setScale(2);
+        if (amount.compareTo(loan.balance()) > 0) {
+            throw new BusinessException("借款 " + req.loanId() + " 余额 " + plain(loan
+                .balance()) + " 元，不足以核销 " + plain(amount) + " 元");
+        }
+        BigDecimal balanceAfter = loan.balance().subtract(amount);
+        try {
+            travelRepository.insertLedger(tenantId, loan.id(), LEDGER_WRITE_OFF, amount, balanceAfter, expense
+                .id(), null, bizDate, null, null, operatorId, "报销冲抵借款", now);
+        } catch (DuplicateKeyException e) {
+            throw new BusinessException("该报销已核销过借款 " + req.loanId());
+        }
+        if (travelRepository.changeBalance(tenantId, loan.id(), loan.balance(), balanceAfter, now) != 1) {
+            throw new BusinessException("借款余额已变化，请刷新后重试");
+        }
     }
 
     /**
@@ -220,7 +286,7 @@ public class OaExpenseService {
                 throw new BusinessException("报销表单发布失败：" + String.join("；", published.errors()));
             }
             OaProcessModelResp model = modelService
-                .create(tenantId, userId, new OaProcessModelCreateReq(TEMPLATE_MODEL_KEY, "费用报销", "finance", "直属上级 → 财务岗位审核；合计超过 5000 元再由总经理岗位审批；通过后由财务登记支付", TEMPLATE_BPMN, OaExpenseHook.BUSINESS_TYPE));
+                .create(tenantId, userId, new OaProcessModelCreateReq(TEMPLATE_MODEL_KEY, "费用报销", "finance", "直属上级 → 财务岗位审核；合计超过 5000 元或超出关联出差预算再由总经理岗位审批；通过后由财务登记支付并可冲抵借款", TEMPLATE_BPMN, OaExpenseHook.BUSINESS_TYPE));
             return new OaExpenseTemplateResp(form.id(), published.versionId(), model.id(), model.modelKey());
         });
     }
@@ -235,7 +301,7 @@ public class OaExpenseService {
         items.put("columns", List
             .of(column(OaExpenseHook.COL_CATEGORY, "费用类型", "radio", true, options), column(OaExpenseHook.COL_AMOUNT, "金额（元）", "number", true, null), column(OaExpenseHook.COL_DATE, "发生日期", "date", false, null), column(OaExpenseHook.COL_INVOICE, "发票号", "text", false, null), column(OaExpenseHook.COL_DESCRIPTION, "说明", "text", false, null)));
         List<Map<String, Object>> fields = List
-            .of(field("reason", "报销事由", "textarea", true), items, field("invoices", "发票附件", "attachment", false));
+            .of(field("reason", "报销事由", "textarea", true), field(OaExpenseHook.FIELD_TRAVEL_NO, "关联出差单号", "text", false), items, field("invoices", "发票附件", "attachment", false));
         try {
             return objectMapper.writeValueAsString(Map.of("fields", fields));
         } catch (Exception e) {
@@ -331,7 +397,7 @@ public class OaExpenseService {
               <bpmn:incoming>flowToFinance</bpmn:incoming>
               <bpmn:outgoing>flowToGateway</bpmn:outgoing>
             </bpmn:userTask>
-            <bpmn:exclusiveGateway id="amountGateway" name="超过 5000 元？" default="flowSmall">
+            <bpmn:exclusiveGateway id="amountGateway" name="超过 5000 元或超预算？" default="flowSmall">
               <bpmn:incoming>flowToGateway</bpmn:incoming>
               <bpmn:outgoing>flowLarge</bpmn:outgoing>
               <bpmn:outgoing>flowSmall</bpmn:outgoing>
@@ -347,10 +413,10 @@ public class OaExpenseService {
             <bpmn:sequenceFlow id="flowToSupervisor" sourceRef="start" targetRef="supervisorApprove"/>
             <bpmn:sequenceFlow id="flowToFinance" sourceRef="supervisorApprove" targetRef="financeApprove"/>
             <bpmn:sequenceFlow id="flowToGateway" sourceRef="financeApprove" targetRef="amountGateway"/>
-            <bpmn:sequenceFlow id="flowLarge" name="大于 5000 元" sourceRef="amountGateway" targetRef="gmApprove">
-              <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${expenseAmount &gt; 5000}</bpmn:conditionExpression>
+            <bpmn:sequenceFlow id="flowLarge" name="大于 5000 元或超预算" sourceRef="amountGateway" targetRef="gmApprove">
+              <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${expenseAmount &gt; 5000 || overBudget}</bpmn:conditionExpression>
             </bpmn:sequenceFlow>
-            <bpmn:sequenceFlow id="flowSmall" name="5000 元及以内" sourceRef="amountGateway" targetRef="end"/>
+            <bpmn:sequenceFlow id="flowSmall" name="5000 元及以内且未超预算" sourceRef="amountGateway" targetRef="end"/>
             <bpmn:sequenceFlow id="flowGmDone" sourceRef="gmApprove" targetRef="end"/>
           </bpmn:process>
           <bpmndi:BPMNDiagram id="BPMNDiagram_expense">

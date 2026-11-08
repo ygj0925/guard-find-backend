@@ -43,6 +43,7 @@ import com.guardfind.backend.oa.repository.OaDraftRepository;
 import com.guardfind.backend.oa.repository.OaExpenseRepository;
 import com.guardfind.backend.oa.repository.OaLaunchRepository;
 import com.guardfind.backend.oa.repository.OaOutboxRepository;
+import com.guardfind.backend.oa.repository.OaTravelRepository;
 import com.guardfind.backend.oa.service.OaApprovalService;
 import com.guardfind.backend.oa.service.OaAttachmentService;
 import com.guardfind.backend.oa.service.OaCcService;
@@ -289,7 +290,7 @@ class OaExpenseServiceTest {
             assertThat(fixture.invoiceCount(first)).isZero();
 
             OaExpensePreviewResp ok = fixture.expenseService
-                .preview(TENANT, form(row("TRAFFIC", "1.5", null), blankRow(), row("OFFICE", "2", "W-1")));
+                .preview(TENANT, APPLICANT, form(row("TRAFFIC", "1.5", null), blankRow(), row("OFFICE", "2", "W-1")));
             assertThat(ok.totalAmount()).isEqualByComparingTo("3.50");
             assertThat(ok.itemCount()).isEqualTo(2);
             assertThat(ok.message()).isNull();
@@ -302,8 +303,9 @@ class OaExpenseServiceTest {
             Map<String, Object> future = row("TRAFFIC", "1", null);
             future.put(OaExpenseHook.COL_DATE, LocalDate.now().plusDays(1).toString());
             assertThat(preview(fixture, future)).contains("发生日期不能晚于今天");
-            assertThat(fixture.expenseService.preview(TENANT, form(blankRow())).message()).contains("请至少填写一条报销明细");
-            assertThat(fixture.expenseService.preview(TENANT, Map.of()).message()).contains("请至少填写一条报销明细");
+            assertThat(fixture.expenseService.preview(TENANT, APPLICANT, form(blankRow())).message())
+                .contains("请至少填写一条报销明细");
+            assertThat(fixture.expenseService.preview(TENANT, APPLICANT, Map.of()).message()).contains("请至少填写一条报销明细");
         });
     }
 
@@ -331,11 +333,11 @@ class OaExpenseServiceTest {
     }
 
     private static String preview(Fixture fixture, Map<String, Object> row) {
-        return fixture.expenseService.preview(TENANT, form(row)).message();
+        return fixture.expenseService.preview(TENANT, APPLICANT, form(row)).message();
     }
 
     private static OaExpensePayReq pay(String amount, LocalDate date) {
-        return new OaExpensePayReq(new BigDecimal(amount), date, "BANK_TRANSFER", "TX-1", null);
+        return new OaExpensePayReq(new BigDecimal(amount), date, "BANK_TRANSFER", "TX-1", null, null);
     }
 
     private static OaApprovalActionReq action(String requestId) {
@@ -403,11 +405,12 @@ class OaExpenseServiceTest {
         ObjectMapper objectMapper = new ObjectMapper();
         StubStaffDirectory directory = new StubStaffDirectory();
 
-        OaExpenseHook hook = new OaExpenseHook(expenseRepository);
+        OaTravelRepository travelRepository = new OaTravelRepository(jdbc);
+        OaExpenseHook hook = new OaExpenseHook(expenseRepository, travelRepository);
         OaLaunchRepository launchRepository = new OaLaunchRepository(jdbc);
         OaBusinessHooks hooks = new OaBusinessHooks(List.of(hook), launchRepository);
         OaOutboxService outboxService = new OaOutboxService(new OaOutboxRepository(jdbc), objectMapper);
-        OaExpenseService expenseService = new OaExpenseService(expenseRepository, hook, null, null, outboxService, objectMapper, transactionManager);
+        OaExpenseService expenseService = new OaExpenseService(expenseRepository, travelRepository, hook, null, null, outboxService, objectMapper, transactionManager);
         seedRelease(jdbc, expenseService.templateSchema(expenseService.categories(TENANT, true)), definition.getId());
 
         OaApprovalEngine engine = new OaApprovalEngine(runtimeService, taskService, historyService, repositoryService);
@@ -420,14 +423,14 @@ class OaExpenseServiceTest {
         return new Fixture(jdbc, hooks, expenseService, launchService, approvalService, runtimeService, taskService);
     }
 
-    private static void seedAccounts(JdbcTemplate jdbc) {
+    static void seedAccounts(JdbcTemplate jdbc) {
         jdbc.update("INSERT INTO sys_user (id, tenant_id, username, nickname, dept_id, status, deleted) VALUES (101, 101, 'alice', 'Alice', 10, 1, 0)");
         jdbc.update("INSERT INTO sys_user (id, tenant_id, username, nickname, dept_id, status, deleted) VALUES (102, 101, 'bob', 'Bob', 10, 1, 0)");
         jdbc.update("INSERT INTO sys_user (id, tenant_id, username, nickname, dept_id, status, deleted) VALUES (103, 101, 'carol', 'Carol', 20, 1, 0)");
         jdbc.update("INSERT INTO sys_user (id, tenant_id, username, nickname, dept_id, status, deleted) VALUES (104, 101, 'dave', 'Dave', 20, 1, 0)");
     }
 
-    private static void seedCategories(OaExpenseRepository repository) {
+    static void seedCategories(OaExpenseRepository repository) {
         LocalDateTime now = LocalDateTime.now();
         repository.insertCategory(TENANT, "TRAFFIC", "交通", null, false, "ENABLED", 1, null, 1, now);
         repository.insertCategory(TENANT, "MEAL", "餐饮", new BigDecimal("500.00"), true, "ENABLED", 2, null, 1, now);
@@ -460,7 +463,7 @@ class OaExpenseServiceTest {
             """, schema, "b".repeat(64));
     }
 
-    private static void createTables(JdbcTemplate jdbc) {
+    static void createTables(JdbcTemplate jdbc) {
         jdbc.execute("CREATE TABLE oa_cc_receipt (id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY, tenant_id BIGINT NOT NULL, application_id BIGINT NOT NULL, process_instance_id VARCHAR(64), receiver_id BIGINT NOT NULL, receiver_name VARCHAR(64), source_task_id VARCHAR(64), cc_by BIGINT, status VARCHAR(20) NOT NULL DEFAULT 'UNREAD', read_time TIMESTAMP, revoke_by BIGINT, revoke_time TIMESTAMP, create_time TIMESTAMP NOT NULL, CONSTRAINT uk_cc UNIQUE (tenant_id, application_id, receiver_id))");
         jdbc.execute("CREATE TABLE sys_user (id BIGINT PRIMARY KEY, tenant_id BIGINT NOT NULL, username VARCHAR(64) NOT NULL, nickname VARCHAR(64), dept_id BIGINT, status INT NOT NULL, deleted BIGINT NOT NULL DEFAULT 0)");
         jdbc.execute("CREATE TABLE sys_dept (id BIGINT PRIMARY KEY, tenant_id BIGINT NOT NULL, name VARCHAR(100) NOT NULL, deleted BIGINT NOT NULL DEFAULT 0)");
@@ -560,7 +563,9 @@ class OaExpenseServiceTest {
             CREATE TABLE oa_expense (
               id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY, tenant_id BIGINT NOT NULL,
               application_id BIGINT NOT NULL, applicant_id BIGINT NOT NULL, total_amount DECIMAL(14,2) NOT NULL,
-              item_count INT NOT NULL, status VARCHAR(20) NOT NULL, paid_amount DECIMAL(14,2), pay_date DATE,
+              item_count INT NOT NULL, status VARCHAR(20) NOT NULL, travel_id BIGINT,
+              over_budget BOOLEAN NOT NULL DEFAULT FALSE, write_off_amount DECIMAL(14,2) NOT NULL DEFAULT 0,
+              paid_amount DECIMAL(14,2), pay_date DATE,
               pay_method VARCHAR(20), pay_reference VARCHAR(64), pay_remark VARCHAR(500), payer_id BIGINT,
               paid_time TIMESTAMP, create_time TIMESTAMP NOT NULL, update_time TIMESTAMP,
               CONSTRAINT uk_expense_application UNIQUE (tenant_id, application_id)
@@ -582,10 +587,47 @@ class OaExpenseServiceTest {
               CONSTRAINT uk_expense_invoice UNIQUE (tenant_id, invoice_no)
             )
             """);
+        createTravelTables(jdbc);
+    }
+
+    static void createTravelTables(JdbcTemplate jdbc) {
+        jdbc.execute("""
+            CREATE TABLE oa_travel (
+              id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY, tenant_id BIGINT NOT NULL,
+              application_id BIGINT NOT NULL, applicant_id BIGINT NOT NULL, travel_no VARCHAR(32),
+              destination VARCHAR(100) NOT NULL, start_date DATE NOT NULL, end_date DATE NOT NULL, days INT NOT NULL,
+              budget_amount DECIMAL(14,2) NOT NULL, status VARCHAR(20) NOT NULL, create_time TIMESTAMP NOT NULL,
+              update_time TIMESTAMP,
+              CONSTRAINT uk_travel_application UNIQUE (tenant_id, application_id),
+              CONSTRAINT uk_travel_no UNIQUE (tenant_id, travel_no)
+            )
+            """);
+        jdbc.execute("""
+            CREATE TABLE oa_loan (
+              id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY, tenant_id BIGINT NOT NULL,
+              application_id BIGINT NOT NULL, applicant_id BIGINT NOT NULL, travel_id BIGINT,
+              amount DECIMAL(14,2) NOT NULL, balance DECIMAL(14,2) NOT NULL DEFAULT 0, status VARCHAR(20) NOT NULL,
+              expected_repay_date DATE, disburse_date DATE, disburse_method VARCHAR(20), disburse_reference VARCHAR(64),
+              disburser_id BIGINT, disbursed_time TIMESTAMP, settled_time TIMESTAMP, create_time TIMESTAMP NOT NULL,
+              update_time TIMESTAMP,
+              CONSTRAINT uk_loan_application UNIQUE (tenant_id, application_id)
+            )
+            """);
+        jdbc.execute("""
+            CREATE TABLE oa_loan_ledger (
+              id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY, tenant_id BIGINT NOT NULL,
+              loan_id BIGINT NOT NULL, action VARCHAR(20) NOT NULL, amount DECIMAL(14,2) NOT NULL,
+              balance_after DECIMAL(14,2) NOT NULL, expense_id BIGINT, request_id VARCHAR(64), biz_date DATE,
+              method VARCHAR(20), reference VARCHAR(64), operator_id BIGINT NOT NULL, remark VARCHAR(500),
+              create_time TIMESTAMP NOT NULL,
+              CONSTRAINT uk_ledger_loan_expense UNIQUE (tenant_id, loan_id, expense_id),
+              CONSTRAINT uk_ledger_request UNIQUE (tenant_id, request_id)
+            )
+            """);
     }
 
     /** 员工目录桩：101–104 在职，101 的直属上级是 102，FINANCE 岗位只有 103，GM 岗位只有 104。 */
-    private static final class StubStaffDirectory implements OaStaffDirectory {
+    static final class StubStaffDirectory implements OaStaffDirectory {
 
         @Override
         public boolean activeEmployee(long tenantId, long userId) {

@@ -18,6 +18,7 @@ package com.guardfind.backend.oa.expense;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.guardfind.backend.oa.business.OaBusinessFields;
 import com.guardfind.backend.oa.business.OaBusinessHook;
 import com.guardfind.backend.oa.business.OaBusinessPreparation;
 import com.guardfind.backend.oa.model.OaExpenseCategoryResp;
@@ -25,7 +26,10 @@ import com.guardfind.backend.oa.model.OaExpenseItemResp;
 import com.guardfind.backend.oa.model.OaExpensePreviewResp;
 import com.guardfind.backend.oa.repository.OaExpenseRepository;
 import com.guardfind.backend.oa.repository.OaExpenseRepository.ExpenseRow;
+import com.guardfind.backend.oa.repository.OaTravelRepository;
+import com.guardfind.backend.oa.repository.OaTravelRepository.TravelRow;
 import com.guardfind.backend.oa.staff.OaAssigneeSpec;
+import com.guardfind.backend.oa.travel.OaLoanHook;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Component;
 import top.continew.starter.core.exception.BusinessException;
@@ -58,7 +62,9 @@ public class OaExpenseHook implements OaBusinessHook {
     public static final String COL_DATE = "expenseDate";
     public static final String COL_INVOICE = "invoiceNo";
     public static final String COL_DESCRIPTION = "description";
+    public static final String FIELD_TRAVEL_NO = "travelNo";
     public static final String VAR_AMOUNT = "expenseAmount";
+    public static final String VAR_OVER_BUDGET = "overBudget";
     public static final String VAR_ITEM_COUNT = "expenseItemCount";
     public static final String VAR_FINANCE_REVIEWER = "financeReviewer";
     public static final String VAR_FINAL_APPROVER = "finalApprover";
@@ -77,10 +83,12 @@ public class OaExpenseHook implements OaBusinessHook {
     private static final int MAX_DESCRIPTION = 500;
 
     private final OaExpenseRepository repository;
+    private final OaTravelRepository travelRepository;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    public OaExpenseHook(OaExpenseRepository repository) {
+    public OaExpenseHook(OaExpenseRepository repository, OaTravelRepository travelRepository) {
         this.repository = repository;
+        this.travelRepository = travelRepository;
     }
 
     @Override
@@ -124,6 +132,10 @@ public class OaExpenseHook implements OaBusinessHook {
         requireColumn(columns, COL_DATE, Set.of("date"), false, "发生日期", errors);
         requireColumn(columns, COL_INVOICE, Set.of("text"), false, "发票号", errors);
         requireColumn(columns, COL_DESCRIPTION, Set.of("text", "textarea"), false, "说明", errors);
+        Map<String, JsonNode> fields = OaBusinessFields.fields(schemaJson);
+        if (fields != null) {
+            OaBusinessFields.requireField(fields, FIELD_TRAVEL_NO, Set.of("text"), false, "关联出差单号", "报销表单", errors);
+        }
         return errors;
     }
 
@@ -135,10 +147,11 @@ public class OaExpenseHook implements OaBusinessHook {
 
     @Override
     public OaBusinessPreparation prepare(long tenantId, long applicantId, Map<String, Object> formData) {
-        ExpensePlan plan = plan(tenantId, formData);
+        ExpensePlan plan = plan(tenantId, applicantId, formData, true);
         Map<String, Object> variables = new LinkedHashMap<>();
         variables.put(VAR_AMOUNT, plan.total().doubleValue());
         variables.put(VAR_ITEM_COUNT, plan.items().size());
+        variables.put(VAR_OVER_BUDGET, plan.overBudget());
         return new OaBusinessPreparation(variables, plan);
     }
 
@@ -150,7 +163,7 @@ public class OaExpenseHook implements OaBusinessHook {
                           LocalDateTime now) {
         ExpensePlan plan = (ExpensePlan)preparation.state();
         long expenseId = repository.insertExpense(tenantId, applicationId, applicantId, plan.total(), plan.items()
-            .size(), STATUS_APPROVING, now);
+            .size(), plan.travelId(), plan.overBudget(), STATUS_APPROVING, now);
         for (OaExpenseItemResp item : plan.items()) {
             repository.insertItem(tenantId, expenseId, applicationId, item);
         }
@@ -177,16 +190,17 @@ public class OaExpenseHook implements OaBusinessHook {
         }
     }
 
-    public OaExpensePreviewResp preview(long tenantId, Map<String, Object> formData) {
+    public OaExpensePreviewResp preview(long tenantId, long applicantId, Map<String, Object> formData) {
         try {
-            ExpensePlan plan = plan(tenantId, formData);
-            return new OaExpensePreviewResp(plan.total(), plan.items().size(), null);
+            ExpensePlan plan = plan(tenantId, applicantId, formData, false);
+            return new OaExpensePreviewResp(plan.total(), plan.items().size(), null, plan.overBudget(), plan
+                .budgetHint());
         } catch (BusinessException e) {
-            return new OaExpensePreviewResp(null, 0, e.getMessage());
+            return new OaExpensePreviewResp(null, 0, e.getMessage(), false, null);
         }
     }
 
-    private ExpensePlan plan(long tenantId, Map<String, Object> formData) {
+    private ExpensePlan plan(long tenantId, long applicantId, Map<String, Object> formData, boolean lock) {
         Object raw = formData.get(FIELD_ITEMS);
         if (raw != null && !(raw instanceof Collection<?>)) {
             throw new BusinessException("报销明细格式非法");
@@ -224,7 +238,19 @@ public class OaExpenseHook implements OaBusinessHook {
         if (!used.isEmpty()) {
             throw new BusinessException("发票号 " + String.join("、", used) + " 已被其他报销使用");
         }
-        return new ExpensePlan(List.copyOf(items), total, List.copyOf(invoiceNos));
+        Long travelId = null;
+        boolean overBudget = false;
+        String budgetHint = null;
+        String travelNo = text(formData.get(FIELD_TRAVEL_NO));
+        if (travelNo != null) {
+            TravelRow travel = OaLoanHook.approvedTravel(travelRepository, tenantId, applicantId, travelNo, lock);
+            BigDecimal claimed = travelRepository.activeExpenseTotal(tenantId, travel.id(), lock).add(total);
+            travelId = travel.id();
+            overBudget = claimed.compareTo(travel.budget()) > 0;
+            budgetHint = "出差 " + travel.travelNo() + " 预算 " + plain(travel
+                .budget()) + " 元，含本单累计报销 " + plain(claimed) + " 元" + (overBudget ? "，已超预算，将追加总经理复核" : "");
+        }
+        return new ExpensePlan(List.copyOf(items), total, List.copyOf(invoiceNos), travelId, overBudget, budgetHint);
     }
 
     private static OaExpenseItemResp item(int line, Map<?, ?> cells, Map<String, OaExpenseCategoryResp> categories) {
@@ -355,6 +381,7 @@ public class OaExpenseHook implements OaBusinessHook {
         return value.stripTrailingZeros().toPlainString();
     }
 
-    public record ExpensePlan(List<OaExpenseItemResp> items, BigDecimal total, List<String> invoiceNos) {
+    public record ExpensePlan(List<OaExpenseItemResp> items, BigDecimal total, List<String> invoiceNos, Long travelId,
+                              boolean overBudget, String budgetHint) {
     }
 }

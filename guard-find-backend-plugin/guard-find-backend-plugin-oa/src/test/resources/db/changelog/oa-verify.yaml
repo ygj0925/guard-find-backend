@@ -37,3 +37,5 @@ databaseChangeLog:
       file: db/changelog/mysql/oa/oa_leave.sql
   - include:
       file: db/changelog/mysql/oa/oa_expense.sql
+  - include:
+      file: db/changelog/mysql/oa/oa_travel.sql
