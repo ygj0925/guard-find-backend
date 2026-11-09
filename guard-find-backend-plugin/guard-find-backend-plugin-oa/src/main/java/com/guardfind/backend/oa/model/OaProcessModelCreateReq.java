@@ -27,5 +27,5 @@ public record OaProcessModelCreateReq(@NotBlank(message = "模型标识不能为
                                       @NotBlank(message = "模型名称不能为空") @Size(max = 100, message = "模型名称不能超过 100 个字符") String name,
                                       @Size(max = 64, message = "分类不能超过 64 个字符") String category,
                                       @Size(max = 500, message = "说明不能超过 500 个字符") String description, String bpmnXml,
-                                      @Pattern(regexp = "GENERIC|LEAVE|EXPENSE|TRAVEL|LOAN|ATTENDANCE_CORRECTION|OVERTIME|OUTING|PURCHASE|SUPPLY_REQUEST|ASSET_SCRAP|CONTRACT|SEAL_USE|DOCUMENT", message = "业务类型不在支持范围内") String businessType) {
+                                      @Pattern(regexp = "GENERIC|LEAVE|EXPENSE|TRAVEL|LOAN|ATTENDANCE_CORRECTION|OVERTIME|OUTING|PURCHASE|SUPPLY_REQUEST|ASSET_SCRAP|CONTRACT|SEAL_USE|DOCUMENT|MEETING_BOOKING|VEHICLE_USE", message = "业务类型不在支持范围内") String businessType) {
 }

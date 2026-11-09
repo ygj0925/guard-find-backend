@@ -142,3 +142,13 @@ databaseChangeLog:
       file: classpath:db/changelog/mysql/oa/oa_document.sql
   - include:
       file: classpath:db/changelog/mysql/oa/oa_contract_menu.sql
+  # OA 会议车辆：会议室/预订、车辆/司机/维保/用车申请、菜单
+  - include:
+      file: classpath:db/changelog/mysql/oa/oa_resource.sql
+  - include:
+      file: classpath:db/changelog/mysql/oa/oa_resource_menu.sql
+  # OA 日程与工作报告：日程/成员、日报周报/批注、菜单
+  - include:
+      file: classpath:db/changelog/mysql/oa/oa_collab.sql
+  - include:
+      file: classpath:db/changelog/mysql/oa/oa_collab_menu.sql

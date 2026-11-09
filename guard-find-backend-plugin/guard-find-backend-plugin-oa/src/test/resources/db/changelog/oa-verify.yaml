@@ -49,3 +49,7 @@ databaseChangeLog:
       file: db/changelog/mysql/oa/oa_contract.sql
   - include:
       file: db/changelog/mysql/oa/oa_document.sql
+  - include:
+      file: db/changelog/mysql/oa/oa_resource.sql
+  - include:
+      file: db/changelog/mysql/oa/oa_collab.sql
