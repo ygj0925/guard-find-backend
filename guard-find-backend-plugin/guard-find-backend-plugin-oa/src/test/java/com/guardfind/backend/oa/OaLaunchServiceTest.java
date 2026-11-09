@@ -180,6 +180,19 @@ class OaLaunchServiceTest {
     }
 
     @Test
+    void detailToleratesEmptyOptionalPersonField() {
+        runner().run(context -> {
+            Fixture fixture = fixture(context, BPMN);
+            OaLaunchSubmitReq req = new OaLaunchSubmitReq("req-no-person", null, Map.of("reason", "事假"), List
+                .of(new OaAssigneeBindingReq("approver", "EMPLOYEE", "102")));
+            OaLaunchSubmitResp resp = fixture.launchService.submit(TENANT, 101, 10, req);
+
+            var application = fixture.applicationService.detail(TENANT, 101, resp.applicationId());
+            assertThat(application.formLabels()).doesNotContainKey("approver");
+        });
+    }
+
+    @Test
     void rejectsInvalidFormWithoutStartingProcess() {
         runner().run(context -> {
             Fixture fixture = fixture(context, BPMN);

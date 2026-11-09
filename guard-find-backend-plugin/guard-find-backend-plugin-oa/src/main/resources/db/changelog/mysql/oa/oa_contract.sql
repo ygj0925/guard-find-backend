@@ -1,0 +1,107 @@
+--liquibase formatted sql
+
+--changeset guardfind:oa-contract
+--comment: 合同用印试点：合同台账与版本（每次送审一版，驳回或待签署可修订）、签署与归档登记（与审批分离、按请求号幂等）、印章档案与用印申请（保管人执行）
+
+CREATE TABLE IF NOT EXISTS `oa_contract` (
+    `id`                   bigint(20)    AUTO_INCREMENT              COMMENT 'ID',
+    `tenant_id`            bigint(20)    NOT NULL DEFAULT 0          COMMENT '租户ID',
+    `contract_no`          varchar(32)   DEFAULT NULL                COMMENT '合同编号',
+    `title`                varchar(200)  NOT NULL                    COMMENT '合同名称（当前版本快照）',
+    `counterparty`         varchar(200)  NOT NULL                    COMMENT '相对方',
+    `contract_type`        varchar(20)   NOT NULL                    COMMENT '类型（SALES/PURCHASE/SERVICE/OTHER）',
+    `amount`               decimal(14,2) NOT NULL                    COMMENT '合同金额',
+    `start_date`           date          NOT NULL                    COMMENT '生效日期',
+    `end_date`             date          NOT NULL                    COMMENT '到期日期',
+    `owner_id`             bigint(20)    NOT NULL                    COMMENT '经办人（首版申请人）',
+    `current_version`      int           NOT NULL DEFAULT 1          COMMENT '当前版本号',
+    `current_application_id` bigint(20)  NOT NULL                    COMMENT '当前版本的 OA 申请',
+    `status`               varchar(20)   NOT NULL                    COMMENT '状态（APPROVING/PENDING_SIGN/SIGNED/ARCHIVED/CLOSED）',
+    `sign_request_id`      varchar(64)   DEFAULT NULL                COMMENT '签署登记幂等请求号',
+    `signed_date`          date          DEFAULT NULL                COMMENT '签署日期',
+    `signatories`          varchar(200)  DEFAULT NULL                COMMENT '签署人（双方）',
+    `sign_remark`          varchar(500)  DEFAULT NULL                COMMENT '签署备注',
+    `signed_by`            bigint(20)    DEFAULT NULL                COMMENT '签署登记人',
+    `signed_time`          datetime      DEFAULT NULL                COMMENT '签署登记时间',
+    `archive_request_id`   varchar(64)   DEFAULT NULL                COMMENT '归档幂等请求号',
+    `archive_no`           varchar(64)   DEFAULT NULL                COMMENT '档案号',
+    `archive_location`     varchar(100)  DEFAULT NULL                COMMENT '存放位置',
+    `archived_by`          bigint(20)    DEFAULT NULL                COMMENT '归档人',
+    `archived_time`        datetime      DEFAULT NULL                COMMENT '归档时间',
+    `create_time`          datetime      NOT NULL                    COMMENT '创建时间',
+    `update_time`          datetime      DEFAULT NULL                COMMENT '修改时间',
+    PRIMARY KEY (`id`),
+    UNIQUE INDEX `uk_tenant_no` (`tenant_id`, `contract_no`),
+    UNIQUE INDEX `uk_tenant_sign_request` (`tenant_id`, `sign_request_id`),
+    UNIQUE INDEX `uk_tenant_archive_request` (`tenant_id`, `archive_request_id`),
+    UNIQUE INDEX `uk_tenant_archive_no` (`tenant_id`, `archive_no`),
+    INDEX `idx_tenant_status` (`tenant_id`, `status`, `id`),
+    INDEX `idx_tenant_end` (`tenant_id`, `status`, `end_date`),
+    INDEX `idx_tenant_owner` (`tenant_id`, `owner_id`, `id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='OA 合同台账（审批通过只到待签署，签署与归档需单独登记）';
+
+CREATE TABLE IF NOT EXISTS `oa_contract_version` (
+    `id`                   bigint(20)    AUTO_INCREMENT              COMMENT 'ID',
+    `tenant_id`            bigint(20)    NOT NULL DEFAULT 0          COMMENT '租户ID',
+    `contract_id`          bigint(20)    NOT NULL                    COMMENT '合同',
+    `version_no`           int           NOT NULL                    COMMENT '版本号',
+    `application_id`       bigint(20)    NOT NULL                    COMMENT 'OA 申请 ID（附件随申请授权）',
+    `title`                varchar(200)  NOT NULL                    COMMENT '合同名称',
+    `counterparty`         varchar(200)  NOT NULL                    COMMENT '相对方',
+    `contract_type`        varchar(20)   NOT NULL                    COMMENT '类型',
+    `amount`               decimal(14,2) NOT NULL                    COMMENT '金额',
+    `start_date`           date          NOT NULL                    COMMENT '生效日期',
+    `end_date`             date          NOT NULL                    COMMENT '到期日期',
+    `summary`              varchar(2000) NOT NULL                    COMMENT '主要条款摘要',
+    `change_note`          varchar(500)  DEFAULT NULL                COMMENT '修订说明',
+    `status`               varchar(20)   NOT NULL                    COMMENT '状态（APPROVING/APPROVED/REJECTED/WITHDRAWN/CANCELLED）',
+    `applicant_id`         bigint(20)    NOT NULL                    COMMENT '送审人',
+    `create_time`          datetime      NOT NULL                    COMMENT '创建时间',
+    `update_time`          datetime      DEFAULT NULL                COMMENT '修改时间',
+    PRIMARY KEY (`id`),
+    UNIQUE INDEX `uk_tenant_application` (`tenant_id`, `application_id`),
+    UNIQUE INDEX `uk_tenant_contract_version` (`tenant_id`, `contract_id`, `version_no`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='OA 合同版本（每次送审一版，审阅轨迹不删除）';
+
+CREATE TABLE IF NOT EXISTS `oa_seal` (
+    `id`                   bigint(20)    AUTO_INCREMENT              COMMENT 'ID',
+    `tenant_id`            bigint(20)    NOT NULL DEFAULT 0          COMMENT '租户ID',
+    `code`                 varchar(32)   NOT NULL                    COMMENT '印章编码',
+    `name`                 varchar(100)  NOT NULL                    COMMENT '印章名称',
+    `seal_type`            varchar(20)   NOT NULL                    COMMENT '类型（OFFICIAL/CONTRACT/FINANCE/LEGAL_REP/OTHER）',
+    `keeper_id`            bigint(20)    NOT NULL                    COMMENT '保管人（唯一可执行用印的人）',
+    `status`               varchar(20)   NOT NULL DEFAULT 'ENABLED'  COMMENT '状态（ENABLED/DISABLED）',
+    `remark`               varchar(500)  DEFAULT NULL                COMMENT '备注',
+    `version`              int           NOT NULL DEFAULT 0          COMMENT '乐观锁版本',
+    `create_user`          bigint(20)    NOT NULL                    COMMENT '创建人',
+    `create_time`          datetime      NOT NULL                    COMMENT '创建时间',
+    `update_user`          bigint(20)    DEFAULT NULL                COMMENT '修改人',
+    `update_time`          datetime      DEFAULT NULL                COMMENT '修改时间',
+    PRIMARY KEY (`id`),
+    UNIQUE INDEX `uk_tenant_code` (`tenant_id`, `code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='OA 印章档案';
+
+CREATE TABLE IF NOT EXISTS `oa_seal_request` (
+    `id`                   bigint(20)    AUTO_INCREMENT              COMMENT 'ID',
+    `tenant_id`            bigint(20)    NOT NULL DEFAULT 0          COMMENT '租户ID',
+    `application_id`       bigint(20)    NOT NULL                    COMMENT 'OA 申请 ID',
+    `applicant_id`         bigint(20)    NOT NULL                    COMMENT '申请人',
+    `seal_id`              bigint(20)    NOT NULL                    COMMENT '印章',
+    `contract_id`          bigint(20)    DEFAULT NULL                COMMENT '关联合同',
+    `copies`               int           NOT NULL                    COMMENT '批准份数',
+    `use_date`             date          NOT NULL                    COMMENT '计划用印日期',
+    `status`               varchar(20)   NOT NULL                    COMMENT '状态（APPROVING/PENDING_SEAL/USED/CLOSED）',
+    `execute_request_id`   varchar(64)   DEFAULT NULL                COMMENT '用印登记幂等请求号',
+    `used_copies`          int           DEFAULT NULL                COMMENT '实际用印份数',
+    `used_date`            date          DEFAULT NULL                COMMENT '实际用印日期',
+    `executor_id`          bigint(20)    DEFAULT NULL                COMMENT '执行人（保管人）',
+    `executed_time`        datetime      DEFAULT NULL                COMMENT '登记时间',
+    `execute_remark`       varchar(500)  DEFAULT NULL                COMMENT '执行备注',
+    `create_time`          datetime      NOT NULL                    COMMENT '创建时间',
+    `update_time`          datetime      DEFAULT NULL                COMMENT '修改时间',
+    PRIMARY KEY (`id`),
+    UNIQUE INDEX `uk_tenant_application` (`tenant_id`, `application_id`),
+    UNIQUE INDEX `uk_tenant_execute_request` (`tenant_id`, `execute_request_id`),
+    INDEX `idx_tenant_status` (`tenant_id`, `status`, `id`),
+    INDEX `idx_tenant_seal` (`tenant_id`, `seal_id`, `id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='OA 用印申请（审批通过后由保管人登记用印）';

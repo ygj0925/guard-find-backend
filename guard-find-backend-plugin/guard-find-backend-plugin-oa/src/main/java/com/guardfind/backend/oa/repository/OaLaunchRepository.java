@@ -441,6 +441,9 @@ public class OaLaunchRepository {
     }
 
     private static List<Long> personIds(Object value) {
+        if (value == null) {
+            return List.of();
+        }
         List<?> items = value instanceof List<?> list ? list : List.of(value);
         List<Long> ids = new ArrayList<>();
         for (Object item : items) {

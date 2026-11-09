@@ -17,6 +17,7 @@
 package com.guardfind.backend.oa.service;
 
 import com.guardfind.backend.oa.engine.OaApprovalEngine;
+import com.guardfind.backend.oa.model.OaLinkedFileResp;
 import com.guardfind.backend.oa.repository.OaAttachmentRepository;
 import com.guardfind.backend.oa.repository.OaAttachmentRepository.AttachmentRow;
 import com.guardfind.backend.oa.repository.OaAttachmentRepository.FileRow;
@@ -139,7 +140,27 @@ public class OaAttachmentService {
         if (!authorized) {
             throw new BusinessException(NOT_FOUND);
         }
-        FileRow file = link.file();
+        return download(link.file());
+    }
+
+    /**
+     * 业务台账内下载：调用方已完成业务授权，这里只确认文件确实属于这些申请。
+     */
+    public DownloadAttachment authorizeApplicationDownload(long tenantId,
+                                                           long fileId,
+                                                           Collection<Long> applicationIds) {
+        LinkedAttachment link = repository.linkedForDownload(tenantId, fileId);
+        if (link == null || applicationIds == null || !applicationIds.contains(link.applicationId())) {
+            throw new BusinessException(NOT_FOUND);
+        }
+        return download(link.file());
+    }
+
+    public List<OaLinkedFileResp> files(long tenantId, Collection<Long> applicationIds) {
+        return repository.filesOfApplications(tenantId, applicationIds);
+    }
+
+    private static DownloadAttachment download(FileRow file) {
         return new DownloadAttachment(displayName(file), file.contentType(), file.size(), toFileInfo(file));
     }
 

@@ -16,6 +16,7 @@
 
 package com.guardfind.backend.oa.repository;
 
+import com.guardfind.backend.oa.model.OaLinkedFileResp;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
@@ -24,6 +25,8 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -156,6 +159,29 @@ public class OaAttachmentRepository {
 
     private static String placeholders(int count) {
         return String.join(",", java.util.Collections.nCopies(count, "?"));
+    }
+
+    /**
+     * 一组申请下可下载的附件清单（业务台账详情展示用，下载仍需逐个鉴权）。
+     */
+    public List<OaLinkedFileResp> filesOfApplications(long tenantId, Collection<Long> applicationIds) {
+        if (applicationIds == null || applicationIds.isEmpty()) {
+            return List.of();
+        }
+        List<Object> args = new ArrayList<>();
+        args.add(tenantId);
+        args.addAll(applicationIds);
+        return jdbcTemplate.query("""
+            SELECT l.application_id, l.file_id, l.file_name, l.file_size
+              FROM oa_attachment_link l
+             WHERE l.tenant_id = ? AND l.application_id IN (%s) AND l.deleted = 0 AND l.available = 1
+             ORDER BY l.application_id DESC, l.id
+            """.formatted(String.join(",", Collections.nCopies(applicationIds.size(), "?"))), (rs,
+                                                                                               rowNum) -> new OaLinkedFileResp(rs
+                                                                                                   .getLong("application_id"), rs
+                                                                                                       .getLong("file_id"), rs
+                                                                                                           .getString("file_name"), nullableLong(rs, "file_size")), args
+                                                                                                               .toArray());
     }
 
     private static Long nullableLong(ResultSet rs, String column) throws SQLException {

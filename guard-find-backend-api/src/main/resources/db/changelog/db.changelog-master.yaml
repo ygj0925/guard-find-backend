@@ -135,3 +135,10 @@ databaseChangeLog:
       file: classpath:db/changelog/mysql/oa/oa_asset.sql
   - include:
       file: classpath:db/changelog/mysql/oa/oa_purchase_menu.sql
+  # OA 合同用印与公文知识：合同/版本/印章/用印申请、公文/版本/阅读回执、菜单
+  - include:
+      file: classpath:db/changelog/mysql/oa/oa_contract.sql
+  - include:
+      file: classpath:db/changelog/mysql/oa/oa_document.sql
+  - include:
+      file: classpath:db/changelog/mysql/oa/oa_contract_menu.sql

@@ -58,7 +58,12 @@ public class OaAttachmentController {
     @Log(ignore = true)
     @GetMapping("/{fileId}")
     public void download(@PathVariable Long fileId, HttpServletResponse response) throws IOException {
-        OaAttachmentService.DownloadAttachment attachment = service.authorizeDownload(tenantId(), userId(), fileId);
+        stream(fileStorageService, service.authorizeDownload(tenantId(), userId(), fileId), response);
+    }
+
+    static void stream(FileStorageService fileStorageService,
+                       OaAttachmentService.DownloadAttachment attachment,
+                       HttpServletResponse response) throws IOException {
         response.setContentType(attachment.contentType() == null || attachment.contentType().isBlank()
             ? MediaType.APPLICATION_OCTET_STREAM_VALUE
             : attachment.contentType());
