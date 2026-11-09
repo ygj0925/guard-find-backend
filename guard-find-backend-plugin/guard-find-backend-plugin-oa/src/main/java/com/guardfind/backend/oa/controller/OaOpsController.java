@@ -19,6 +19,8 @@ package com.guardfind.backend.oa.controller;
 import cn.dev33.satoken.annotation.SaCheckPermission;
 import com.guardfind.backend.common.context.UserContextHolder;
 import com.guardfind.backend.oa.model.OaApprovalActionResp;
+import com.guardfind.backend.oa.model.OaOpsAuditResp;
+import com.guardfind.backend.oa.model.OaOpsExportResp;
 import com.guardfind.backend.oa.model.OaOpsTerminateReq;
 import com.guardfind.backend.oa.model.OaOutboxEventResp;
 import com.guardfind.backend.oa.service.OaOpsService;
@@ -40,7 +42,7 @@ import top.continew.starter.extension.crud.model.resp.PageResp;
 import top.continew.starter.log.annotation.Log;
 
 /**
- * OA 运维 API：outbox 重试/立即投递与独立授权的流程终止。
+ * OA 运维 API：outbox 重试/立即投递、独立授权的流程终止、干预审计与导出任务排查。
  *
  * <p>
  * 终止权限与审批动作权限分离，避免管理员因拥有审批权限而默认获得代签/终止能力。
@@ -74,14 +76,14 @@ public class OaOpsController {
     @SaCheckPermission("system:oa:ops:outbox:retry")
     @PostMapping("/outbox/{id}/retry")
     public void retry(@PathVariable Long id) {
-        service.retryOutbox(tenantId(), id);
+        service.retryOutbox(tenantId(), userId(), id);
     }
 
     @Operation(summary = "立即投递到期事件")
     @SaCheckPermission("system:oa:ops:outbox:retry")
     @PostMapping("/outbox/dispatch")
     public OaOutboxDispatcher.DispatchResult dispatch() {
-        return service.dispatchNow();
+        return service.dispatchNow(tenantId(), userId());
     }
 
     @Operation(summary = "终止运行中申请")
@@ -89,6 +91,27 @@ public class OaOpsController {
     @PostMapping("/application/{id}/terminate")
     public OaApprovalActionResp terminate(@PathVariable Long id, @Valid @RequestBody OaOpsTerminateReq req) {
         return service.terminate(tenantId(), userId(), id, req);
+    }
+
+    @Operation(summary = "运维干预审计分页")
+    @SaCheckPermission("system:oa:ops:list")
+    @GetMapping("/audits")
+    public PageResp<OaOpsAuditResp> audits(@RequestParam(required = false) String action, PageQuery pageQuery) {
+        return toPage(service.audits(tenantId(), action, pageQuery.getPage(), pageQuery.getSize()));
+    }
+
+    @Operation(summary = "租户导出任务分页（只读，不提供下载）")
+    @SaCheckPermission("system:oa:ops:list")
+    @GetMapping("/exports")
+    public PageResp<OaOpsExportResp> exports(@RequestParam(required = false) String status, PageQuery pageQuery) {
+        return toPage(service.exports(tenantId(), status, pageQuery.getPage(), pageQuery.getSize()));
+    }
+
+    private static <T> PageResp<T> toPage(OaOpsService.Page<T> page) {
+        PageResp<T> resp = new PageResp<>();
+        resp.setList(page.items());
+        resp.setTotal(page.total());
+        return resp;
     }
 
     private static long tenantId() {

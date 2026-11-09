@@ -152,3 +152,11 @@ databaseChangeLog:
       file: classpath:db/changelog/mysql/oa/oa_collab.sql
   - include:
       file: classpath:db/changelog/mysql/oa/oa_collab_menu.sql
+  # OA 工作台与统计：异步导出任务、菜单
+  - include:
+      file: classpath:db/changelog/mysql/oa/oa_stats.sql
+  - include:
+      file: classpath:db/changelog/mysql/oa/oa_stats_menu.sql
+  # OA 运维干预审计
+  - include:
+      file: classpath:db/changelog/mysql/oa/oa_ops_audit.sql

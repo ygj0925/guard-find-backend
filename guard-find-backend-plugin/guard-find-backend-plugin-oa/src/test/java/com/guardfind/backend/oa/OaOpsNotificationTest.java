@@ -27,15 +27,21 @@ import com.guardfind.backend.oa.form.OaFormValueValidator;
 import com.guardfind.backend.oa.model.OaApprovalActionReq;
 import com.guardfind.backend.oa.model.OaAssigneeBindingReq;
 import com.guardfind.backend.oa.model.OaLaunchSubmitReq;
+import com.guardfind.backend.oa.controller.OaOpsController;
 import com.guardfind.backend.oa.model.OaOpsTerminateReq;
+import com.guardfind.backend.oa.model.OaTaskCcReq;
+import com.guardfind.backend.oa.model.OaTaskTransferReq;
 import com.guardfind.backend.oa.model.OaUrgeResp;
 import com.guardfind.backend.oa.repository.OaApprovalRepository;
 import com.guardfind.backend.oa.repository.OaAttachmentRepository;
 import com.guardfind.backend.oa.repository.OaCcRepository;
+import com.guardfind.backend.oa.repository.OaDelegateRepository;
 import com.guardfind.backend.oa.repository.OaDraftRepository;
 import com.guardfind.backend.oa.repository.OaLaunchRepository;
 import com.guardfind.backend.oa.repository.OaNotificationRepository;
+import com.guardfind.backend.oa.repository.OaOpsRepository;
 import com.guardfind.backend.oa.repository.OaOutboxRepository;
+import com.guardfind.backend.oa.service.OaApprovalService;
 import com.guardfind.backend.oa.service.OaAttachmentService;
 import com.guardfind.backend.oa.service.OaCcService;
 import com.guardfind.backend.oa.service.OaLaunchService;
@@ -60,12 +66,18 @@ import org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration;
 import org.springframework.boot.autoconfigure.jdbc.DataSourceTransactionManagerAutoConfiguration;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.ConfigurableApplicationContext;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 import top.continew.starter.core.exception.BusinessException;
 
 import javax.sql.DataSource;
+import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -74,7 +86,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * 10.6 outbox 投递、站内通知、催办限频、超期去重与运维终止。
+ * 10.6 outbox 投递、站内通知、催办限频、超期去重与运维终止；16.2 运维干预审计与禁止代签。
  */
 class OaOpsNotificationTest {
 
@@ -168,7 +180,7 @@ class OaOpsNotificationTest {
                 .update("""
                     UPDATE oa_outbox SET payload = ?, retry_count = 5 WHERE id = ?
                     """, "{\"applicationId\":" + applicationId + ",\"notificationType\":\"TODO\",\"title\":\"重试成功\",\"content\":\"已恢复\",\"recipients\":[102]}", brokenId);
-            fixture.opsService.retryOutbox(TENANT, brokenId);
+            fixture.opsService.retryOutbox(TENANT, 999, brokenId);
             assertThat(fixture.jdbc
                 .queryForObject("SELECT next_retry_time FROM oa_outbox WHERE id = ?", java.sql.Timestamp.class, brokenId))
                 .isNull();
@@ -181,7 +193,130 @@ class OaOpsNotificationTest {
                 .isEqualTo("SENT");
             assertThat(fixture.notificationService.page(TENANT, 102, false, 1, 10).items()).anyMatch(item -> "重试成功"
                 .equals(item.title()));
+
+            var audits = fixture.opsService.audits(TENANT, "OUTBOX_RETRY", 1, 10);
+            assertThat(audits.total()).isEqualTo(1);
+            assertThat(audits.items().get(0).operatorId()).isEqualTo(999);
+            assertThat(audits.items().get(0).operatorName()).isEqualTo("Ops");
+            assertThat(audits.items().get(0).targetType()).isEqualTo("OUTBOX");
+            assertThat(audits.items().get(0).targetId()).isEqualTo(Long.toString(brokenId));
+            assertThat(audits.items().get(0).detailJson()).contains("\"previousStatus\":\"FAILED\"")
+                .contains("\"previousRetryCount\":5");
+
+            assertThatThrownBy(() -> fixture.opsService.retryOutbox(TENANT, 999, brokenId))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("无法重试");
+            assertThat(fixture.opsService.audits(TENANT, "OUTBOX_RETRY", 1, 10).total()).isEqualTo(1);
         });
+    }
+
+    @Test
+    void manualDispatchOnlyDeliversCurrentTenantAndIsAudited() {
+        runner().run(context -> {
+            Fixture fixture = fixture(context);
+            fixture.submit();
+            fixture.jdbc
+                .update("""
+                    INSERT INTO oa_outbox
+                      (tenant_id, event_id, aggregate_type, aggregate_id, event_type, payload, dedup_key,
+                       status, retry_count, create_time)
+                    VALUES (202, 'other-tenant-event', 'APPLICATION', '1', 'APPLICATION_SUBMITTED', ?, 'OTHER:1',
+                            'PENDING', 0, ?)
+                    """, "{\"applicationId\":1,\"notificationType\":\"TODO\",\"title\":\"他租户\",\"content\":\"x\",\"recipients\":[201]}", LocalDateTime
+                    .now());
+
+            OaOutboxDispatcher.DispatchResult result = fixture.opsService.dispatchNow(TENANT, 999);
+            assertThat(result.scanned()).isEqualTo(1);
+            assertThat(result.sent()).isEqualTo(1);
+            assertThat(fixture.jdbc.queryForObject("SELECT status FROM oa_outbox WHERE tenant_id = 202", String.class))
+                .isEqualTo("PENDING");
+            assertThat(fixture.jdbc
+                .queryForObject("SELECT COUNT(*) FROM oa_notification WHERE tenant_id = 202", Integer.class)).isZero();
+
+            var audits = fixture.opsService.audits(TENANT, null, 1, 10);
+            assertThat(audits.total()).isEqualTo(1);
+            assertThat(audits.items().get(0).action()).isEqualTo("OUTBOX_DISPATCH");
+            assertThat(audits.items().get(0).detailJson()).contains("\"sent\":1");
+            assertThat(fixture.opsService.audits(202, null, 1, 10).total()).isZero();
+        });
+    }
+
+    @Test
+    void exportTaskViewIsTenantScopedAndFilterable() {
+        runner().run(context -> {
+            Fixture fixture = fixture(context);
+            fixture.insertExport(TENANT, 101, "e1", "FAILED", "生成失败");
+            fixture.insertExport(TENANT, 102, "e2", "DONE", null);
+            fixture.insertExport(202, 201, "e3", "FAILED", "他租户失败");
+
+            var failed = fixture.opsService.exports(TENANT, "FAILED", 1, 10);
+            assertThat(failed.total()).isEqualTo(1);
+            assertThat(failed.items().get(0).userName()).isEqualTo("Alice");
+            assertThat(failed.items().get(0).errorMessage()).isEqualTo("生成失败");
+            assertThat(fixture.opsService.exports(TENANT, null, 1, 10).total()).isEqualTo(2);
+            assertThat(fixture.opsService.exports(TENANT, null, 1, 1).items()).hasSize(1);
+        });
+    }
+
+    @Test
+    void adminWithoutTaskIdentityCannotActOnOthersTask() {
+        runner().run(context -> {
+            Fixture fixture = fixture(context);
+            long applicationId = fixture.submit();
+            String taskId = fixture.managerTaskId();
+            OaApprovalService approval = fixture.approvalService;
+
+            assertThatThrownBy(() -> approval.approve(TENANT, 999, taskId, new OaApprovalActionReq("x-approve", null)))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("无权");
+            assertThatThrownBy(() -> approval.reject(TENANT, 999, taskId, new OaApprovalActionReq("x-reject", "驳回")))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("无权");
+            assertThatThrownBy(() -> approval
+                .returnToPrevious(TENANT, 999, taskId, new OaApprovalActionReq("x-return", "退回")))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("无权");
+            assertThatThrownBy(() -> approval.claim(TENANT, 999, taskId, new OaApprovalActionReq("x-claim", null)))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("无权");
+            assertThatThrownBy(() -> approval
+                .transfer(TENANT, 999, taskId, new OaTaskTransferReq("x-transfer", 103L, "转给 Carol")))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("无权");
+            assertThatThrownBy(() -> approval.addCc(TENANT, 999, taskId, new OaTaskCcReq("x-cc", List.of(103L), "抄送")))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("无权");
+            assertThatThrownBy(() -> approval
+                .withdraw(TENANT, 999, applicationId, new OaApprovalActionReq("x-withdraw", null)))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("无权");
+
+            Task task = fixture.taskService.createTaskQuery().taskId(taskId).singleResult();
+            assertThat(task.getAssignee()).isEqualTo("102");
+            assertThat(fixture.jdbc
+                .queryForObject("SELECT COUNT(*) FROM oa_approval_audit WHERE operator_id = 999", Integer.class))
+                .isZero();
+            assertThat(fixture.jdbc.queryForObject("SELECT COUNT(*) FROM oa_cc_receipt", Integer.class)).isZero();
+
+            approval.approve(TENANT, 102, taskId, new OaApprovalActionReq("bob-approve", null));
+            assertThat(fixture.jdbc
+                .queryForObject("SELECT status FROM oa_application WHERE id = ?", String.class, applicationId))
+                .isEqualTo("APPROVED");
+        });
+    }
+
+    @Test
+    void opsControllerExposesNoTaskCompletionEndpoint() {
+        List<String> endpoints = Arrays.stream(OaOpsController.class.getDeclaredMethods())
+            .filter(method -> Modifier.isPublic(method.getModifiers()))
+            .filter(method -> method.isAnnotationPresent(GetMapping.class) || method
+                .isAnnotationPresent(PostMapping.class))
+            .map(Method::getName)
+            .sorted()
+            .toList();
+        assertThat(endpoints).containsExactly("audits", "dispatch", "exports", "outbox", "retry", "terminate");
+        assertThat(Arrays.stream(OaOpsController.class.getDeclaredMethods()).map(Method::getName))
+            .noneMatch(name -> name.matches("(?i).*(approve|reject|complete|claim|transfer|delegate).*"));
     }
 
     @Test
@@ -277,6 +412,13 @@ class OaOpsNotificationTest {
                 .terminate(TENANT, 999, applicationId, new OaOpsTerminateReq("terminate-2", "再次终止")))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("仅进行中");
+
+            var audits = fixture.opsService.audits(TENANT, "TERMINATE", 1, 10);
+            assertThat(audits.total()).isEqualTo(1);
+            assertThat(audits.items().get(0).targetType()).isEqualTo("APPLICATION");
+            assertThat(audits.items().get(0).targetId()).isEqualTo(Long.toString(applicationId));
+            assertThat(audits.items().get(0).reason()).isEqualTo("信息不实");
+            assertThat(fixture.opsService.audits(TENANT, "OUTBOX_RETRY", 1, 10).total()).isZero();
         });
     }
 
@@ -324,15 +466,20 @@ class OaOpsNotificationTest {
         OaApprovalRepository approvalRepository = new OaApprovalRepository(jdbc);
         OaUrgeService urgeService = new OaUrgeService(approvalRepository, launchRepository, outboxRepository, engine, outboxService, objectMapper, transactionManager, 10, 5);
         OaOverdueService overdueService = new OaOverdueService(approvalRepository, outboxRepository, engine, outboxService, 24, 200);
-        OaOpsService opsService = new OaOpsService(approvalRepository, launchRepository, dispatcher, outboxService, engine, new OaBusinessHooks(List
+        OaOpsService opsService = new OaOpsService(approvalRepository, launchRepository, outboxRepository, new OaOpsRepository(jdbc), dispatcher, outboxService, engine, new OaBusinessHooks(List
             .of(), launchRepository), objectMapper, transactionManager);
-        return new Fixture(jdbc, launchService, notificationService, dispatcher, urgeService, overdueService, opsService, runtimeService, taskService);
+        OaApprovalService approvalService = new OaApprovalService(approvalRepository, launchRepository, new OaDelegateRepository(jdbc), new StubStaffDirectory(), engine, outboxService, new OaCcService(new OaCcRepository(jdbc), launchRepository, outboxService), new OaBusinessHooks(List
+            .of(), launchRepository), objectMapper, transactionManager);
+        return new Fixture(jdbc, launchService, notificationService, dispatcher, urgeService, overdueService, opsService, approvalService, runtimeService, taskService);
     }
 
     private static void seedAccounts(JdbcTemplate jdbc) {
         jdbc.update("INSERT INTO sys_user (id, tenant_id, username, nickname, dept_id, status, deleted) VALUES (101, 101, 'alice', 'Alice', 10, 1, 0)");
         jdbc.update("INSERT INTO sys_user (id, tenant_id, username, nickname, dept_id, status, deleted) VALUES (102, 101, 'bob', 'Bob', 10, 1, 0)");
         jdbc.update("INSERT INTO sys_user (id, tenant_id, username, nickname, dept_id, status, deleted) VALUES (103, 101, 'carol', 'Carol', 20, 1, 0)");
+        jdbc.update("INSERT INTO sys_user (id, tenant_id, username, nickname, dept_id, status, deleted) VALUES (999, 101, 'ops', 'Ops', 10, 1, 0)");
+        jdbc.update("INSERT INTO sys_role (id, tenant_id, code, deleted) VALUES (1, 101, 'admin', 0)");
+        jdbc.update("INSERT INTO sys_user_role (id, tenant_id, user_id, role_id) VALUES (1, 101, 999, 1)");
     }
 
     private static void seedRelease(JdbcTemplate jdbc, String engineDefinitionId) {
@@ -442,6 +589,33 @@ class OaOpsNotificationTest {
               CONSTRAINT uk_notification_dedup UNIQUE (tenant_id, user_id, dedup_key)
             )
             """);
+        jdbc.execute("""
+            CREATE TABLE oa_ops_audit (
+              id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY, tenant_id BIGINT NOT NULL,
+              action VARCHAR(32) NOT NULL, target_type VARCHAR(32) NOT NULL, target_id VARCHAR(64),
+              operator_id BIGINT NOT NULL, operator_name VARCHAR(64), reason VARCHAR(500), detail_json CLOB,
+              create_time TIMESTAMP NOT NULL
+            )
+            """);
+        jdbc.execute("""
+            CREATE TABLE oa_export_task (
+              id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY, tenant_id BIGINT NOT NULL, user_id BIGINT NOT NULL,
+              request_id VARCHAR(64) NOT NULL, export_type VARCHAR(32) NOT NULL, date_from DATE NOT NULL,
+              date_to DATE NOT NULL, business_type VARCHAR(64), status VARCHAR(20) NOT NULL, file_name VARCHAR(200),
+              file_path VARCHAR(500), row_count INT, error_message VARCHAR(500), start_time TIMESTAMP,
+              finish_time TIMESTAMP, expire_time TIMESTAMP, create_time TIMESTAMP NOT NULL,
+              CONSTRAINT uk_tenant_user_request UNIQUE (tenant_id, user_id, request_id)
+            )
+            """);
+        jdbc.execute("""
+            CREATE TABLE oa_delegate_rule (
+              id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY, tenant_id BIGINT NOT NULL,
+              delegator_id BIGINT NOT NULL, delegate_id BIGINT NOT NULL, start_time TIMESTAMP NOT NULL,
+              end_time TIMESTAMP NOT NULL, status VARCHAR(20) NOT NULL DEFAULT 'ENABLED', reason VARCHAR(500),
+              create_user BIGINT NOT NULL, create_time TIMESTAMP NOT NULL, update_user BIGINT,
+              update_time TIMESTAMP, deleted BIGINT NOT NULL DEFAULT 0
+            )
+            """);
     }
 
     /** 员工目录桩：101/102/103 在职。 */
@@ -484,7 +658,18 @@ class OaOpsNotificationTest {
 
     private record Fixture(JdbcTemplate jdbc, OaLaunchService launchService, OaNotificationService notificationService,
                            OaOutboxDispatcher dispatcher, OaUrgeService urgeService, OaOverdueService overdueService,
-                           OaOpsService opsService, RuntimeService runtimeService, TaskService taskService) {
+                           OaOpsService opsService, OaApprovalService approvalService, RuntimeService runtimeService,
+                           TaskService taskService) {
+
+        private void insertExport(long tenantId, long userId, String requestId, String status, String error) {
+            jdbc.update("""
+                INSERT INTO oa_export_task
+                  (tenant_id, user_id, request_id, export_type, date_from, date_to, status, file_path, error_message, create_time)
+                VALUES (?, ?, ?, 'APPLICATION', ?, ?, ?, '/secret/path.xlsx', ?, ?)
+                """, tenantId, userId, requestId, LocalDate
+                .now()
+                .minusDays(7), LocalDate.now(), status, error, LocalDateTime.now());
+        }
 
         private long submit() {
             return launchService.submit(TENANT, 101, 10, new OaLaunchSubmitReq("req-submit-" + System

@@ -71,16 +71,29 @@ public class OaOutboxRepository {
     }
 
     public List<OaOutboxEventResp> findDue(LocalDateTime now, int maxRetries, int limit) {
+        return findDue(null, now, maxRetries, limit);
+    }
+
+    public List<OaOutboxEventResp> findDue(Long tenantId, LocalDateTime now, int maxRetries, int limit) {
+        List<Object> args = new ArrayList<>();
+        String tenantFilter = "";
+        if (tenantId != null) {
+            tenantFilter = " AND tenant_id = ?";
+            args.add(tenantId);
+        }
+        args.add(maxRetries);
+        args.add(now);
+        args.add(limit);
         return jdbcTemplate.query("""
             SELECT id, tenant_id, event_id, aggregate_type, aggregate_id, event_type, payload, status, retry_count,
                    next_retry_time, last_error, create_time, sent_time
               FROM oa_outbox
-             WHERE status IN ('PENDING', 'FAILED')
+             WHERE status IN ('PENDING', 'FAILED')%s
                AND retry_count < ?
                AND (next_retry_time IS NULL OR next_retry_time <= ?)
              ORDER BY id ASC
              LIMIT ?
-            """, MAPPER, maxRetries, now, limit);
+            """.formatted(tenantFilter), MAPPER, args.toArray());
     }
 
     /**

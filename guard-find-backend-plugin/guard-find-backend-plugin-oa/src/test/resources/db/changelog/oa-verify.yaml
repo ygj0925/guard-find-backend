@@ -53,3 +53,7 @@ databaseChangeLog:
       file: db/changelog/mysql/oa/oa_resource.sql
   - include:
       file: db/changelog/mysql/oa/oa_collab.sql
+  - include:
+      file: db/changelog/mysql/oa/oa_stats.sql
+  - include:
+      file: db/changelog/mysql/oa/oa_ops_audit.sql

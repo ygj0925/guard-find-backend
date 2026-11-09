@@ -31,6 +31,7 @@ import org.flowable.task.api.Task;
 import org.flowable.task.api.history.HistoricTaskInstance;
 
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.LinkedHashSet;
 import java.util.List;
 
@@ -92,6 +93,37 @@ public class OaApprovalEngine {
             .taskCandidateOrAssigned(userId)
             .orderByTaskCreateTime()
             .desc()
+            .listPage(0, Math.max(1, limit));
+    }
+
+    /**
+     * 当前用户待办数；createdBefore 非空时只计创建早于该时刻的（即超期待办）。
+     */
+    public long countTodo(String tenantId, String userId, Date createdBefore) {
+        requireText(tenantId, "租户不能为空");
+        requireText(userId, "用户不能为空");
+        var query = taskService.createTaskQuery().taskTenantId(tenantId).taskCandidateOrAssigned(userId);
+        if (createdBefore != null) {
+            query.taskCreatedBefore(createdBefore);
+        }
+        return query.count();
+    }
+
+    public long countTasksCreatedBefore(String tenantId, Date createdBefore) {
+        requireText(tenantId, "租户不能为空");
+        return taskService.createTaskQuery().taskTenantId(tenantId).taskCreatedBefore(createdBefore).count();
+    }
+
+    /**
+     * 租户内创建早于指定时刻的活动任务，最早的在前。
+     */
+    public List<Task> tasksCreatedBefore(String tenantId, Date createdBefore, int limit) {
+        requireText(tenantId, "租户不能为空");
+        return taskService.createTaskQuery()
+            .taskTenantId(tenantId)
+            .taskCreatedBefore(createdBefore)
+            .orderByTaskCreateTime()
+            .asc()
             .listPage(0, Math.max(1, limit));
     }
 

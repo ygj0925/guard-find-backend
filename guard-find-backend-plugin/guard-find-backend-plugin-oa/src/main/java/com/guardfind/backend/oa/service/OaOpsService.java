@@ -20,12 +20,17 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.guardfind.backend.oa.business.OaBusinessHooks;
 import com.guardfind.backend.oa.engine.OaApprovalEngine;
 import com.guardfind.backend.oa.model.OaApprovalActionResp;
+import com.guardfind.backend.oa.model.OaOpsAuditResp;
+import com.guardfind.backend.oa.model.OaOpsExportResp;
 import com.guardfind.backend.oa.model.OaOpsTerminateReq;
+import com.guardfind.backend.oa.model.OaOutboxEventResp;
 import com.guardfind.backend.oa.repository.OaApprovalRepository;
 import com.guardfind.backend.oa.repository.OaApprovalRepository.ApprovalApplication;
 import com.guardfind.backend.oa.repository.OaApprovalRepository.ApplicationBrief;
 import com.guardfind.backend.oa.repository.OaLaunchRepository;
 import com.guardfind.backend.oa.repository.OaLaunchRepository.DedupRecord;
+import com.guardfind.backend.oa.repository.OaOpsRepository;
+import com.guardfind.backend.oa.repository.OaOutboxRepository;
 import org.flowable.common.engine.api.FlowableException;
 import org.flowable.task.api.Task;
 import org.springframework.dao.DuplicateKeyException;
@@ -40,20 +45,25 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 运维干预：独立授权的流程终止、outbox 人工重试与立即投递。
+ * 运维干预：独立授权的流程终止、outbox 人工重试与立即投递，均写入只追加的运维审计。
  *
  * <p>
- * 终止不复用审批动作权限，必须填写原因并写不可变审计；管理员默认没有代签能力。
+ * 终止不复用审批动作权限，必须填写原因；本服务不提供任何完成/驳回任务的入口，管理员与运维默认没有代签能力。
  * </p>
  */
 @Service
 public class OaOpsService {
 
     public static final String COMMAND_TERMINATE = "TERMINATE";
+    public static final String ACTION_OUTBOX_RETRY = "OUTBOX_RETRY";
+    public static final String ACTION_OUTBOX_DISPATCH = "OUTBOX_DISPATCH";
     private static final int DEDUP_TTL_HOURS = 24;
+    private static final int MAX_PAGE_SIZE = 100;
 
     private final OaApprovalRepository approvalRepository;
     private final OaLaunchRepository launchRepository;
+    private final OaOutboxRepository outboxRepository;
+    private final OaOpsRepository opsRepository;
     private final OaOutboxDispatcher dispatcher;
     private final OaOutboxService outboxService;
     private final OaApprovalEngine engine;
@@ -63,6 +73,8 @@ public class OaOpsService {
 
     public OaOpsService(OaApprovalRepository approvalRepository,
                         OaLaunchRepository launchRepository,
+                        OaOutboxRepository outboxRepository,
+                        OaOpsRepository opsRepository,
                         OaOutboxDispatcher dispatcher,
                         OaOutboxService outboxService,
                         OaApprovalEngine engine,
@@ -71,6 +83,8 @@ public class OaOpsService {
                         PlatformTransactionManager transactionManager) {
         this.approvalRepository = approvalRepository;
         this.launchRepository = launchRepository;
+        this.outboxRepository = outboxRepository;
+        this.opsRepository = opsRepository;
         this.dispatcher = dispatcher;
         this.outboxService = outboxService;
         this.engine = engine;
@@ -143,8 +157,12 @@ public class OaOpsService {
             .filter(java.util.Objects::nonNull)
             .toList());
         detail.put("reason", reason);
+        String detailJson = writeJson(detail);
+        String operator = operatorName(tenantId, actorId);
         approvalRepository.insertAudit(tenantId, applicationId, application
-            .processInstanceId(), null, COMMAND_TERMINATE, actorId, operatorName(tenantId, actorId), null, reason, requestId, writeJson(detail), now);
+            .processInstanceId(), null, COMMAND_TERMINATE, actorId, operator, null, reason, requestId, detailJson, now);
+        opsRepository.insertAudit(tenantId, COMMAND_TERMINATE, "APPLICATION", Long
+            .toString(applicationId), actorId, operator, reason, detailJson, now);
         if (brief != null) {
             outboxService.recordNotification(tenantId, OaOutboxService.AGGREGATE_APPLICATION, Long
                 .toString(applicationId), OaOutboxService.EVENT_APPLICATION_TERMINATED, "TERMINATE:" + requestId, applicationId, null, "CANCELLED", "申请已被终止", "您的申请「" + brief
@@ -159,12 +177,52 @@ public class OaOpsService {
         return dispatcher.page(tenantId, status, keyword, page, size);
     }
 
-    public void retryOutbox(long tenantId, long id) {
-        dispatcher.retry(tenantId, id);
+    public void retryOutbox(long tenantId, long actorId, long id) {
+        OaOutboxEventResp event = outboxRepository.findById(tenantId, id);
+        if (event == null) {
+            throw new BusinessException("事件不存在、仍在处理中或已成功，无法重试");
+        }
+        transactionTemplate.executeWithoutResult(status -> {
+            dispatcher.retry(tenantId, id);
+            Map<String, Object> detail = new LinkedHashMap<>();
+            detail.put("eventType", event.eventType());
+            detail.put("aggregateType", event.aggregateType());
+            detail.put("aggregateId", event.aggregateId());
+            detail.put("previousStatus", event.status());
+            detail.put("previousRetryCount", event.retryCount());
+            detail.put("lastError", event.lastError());
+            opsRepository.insertAudit(tenantId, ACTION_OUTBOX_RETRY, "OUTBOX", Long
+                .toString(id), actorId, operatorName(tenantId, actorId), null, writeJson(detail), LocalDateTime.now());
+        });
     }
 
-    public OaOutboxDispatcher.DispatchResult dispatchNow() {
-        return dispatcher.dispatchDue();
+    public OaOutboxDispatcher.DispatchResult dispatchNow(long tenantId, long actorId) {
+        OaOutboxDispatcher.DispatchResult result = dispatcher.dispatchDue(tenantId);
+        Map<String, Object> detail = new LinkedHashMap<>();
+        detail.put("scanned", result.scanned());
+        detail.put("sent", result.sent());
+        detail.put("failed", result.failed());
+        opsRepository
+            .insertAudit(tenantId, ACTION_OUTBOX_DISPATCH, "OUTBOX_BATCH", null, actorId, operatorName(tenantId, actorId), null, writeJson(detail), LocalDateTime
+                .now());
+        return result;
+    }
+
+    public Page<OaOpsAuditResp> audits(long tenantId, String action, int page, int size) {
+        int safeSize = Math.min(MAX_PAGE_SIZE, Math.max(1, size));
+        int offset = (Math.max(1, page) - 1) * safeSize;
+        return new Page<>(opsRepository.pageAudits(tenantId, action, offset, safeSize), opsRepository
+            .countAudits(tenantId, action));
+    }
+
+    public Page<OaOpsExportResp> exports(long tenantId, String status, int page, int size) {
+        int safeSize = Math.min(MAX_PAGE_SIZE, Math.max(1, size));
+        int offset = (Math.max(1, page) - 1) * safeSize;
+        return new Page<>(opsRepository.pageExports(tenantId, status, offset, safeSize), opsRepository
+            .countExports(tenantId, status));
+    }
+
+    public record Page<T>(List<T> items, long total) {
     }
 
     private OaApprovalActionResp replay(DedupRecord record) {

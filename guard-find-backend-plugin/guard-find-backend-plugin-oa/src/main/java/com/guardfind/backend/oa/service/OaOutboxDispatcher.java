@@ -59,9 +59,14 @@ public class OaOutboxDispatcher {
     }
 
     public DispatchResult dispatchDue() {
+        return dispatchDue(null);
+    }
+
+    /** tenantId 为空时投递全部租户（定时任务），否则只投递该租户的到期事件（运维手动触发）。 */
+    public DispatchResult dispatchDue(Long tenantId) {
         LocalDateTime now = LocalDateTime.now();
         repository.recoverStuck(now.minusSeconds(processingTimeoutSeconds), now);
-        List<OaOutboxEventResp> events = repository.findDue(now, maxRetries, batchSize);
+        List<OaOutboxEventResp> events = repository.findDue(tenantId, now, maxRetries, batchSize);
         int sent = 0;
         int failed = 0;
         for (OaOutboxEventResp event : events) {
