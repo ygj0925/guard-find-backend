@@ -128,3 +128,10 @@ databaseChangeLog:
       file: classpath:db/changelog/mysql/oa/oa_attendance.sql
   - include:
       file: classpath:db/changelog/mysql/oa/oa_attendance_menu.sql
+  # OA 采购资产：部门预算/采购单/验收、用品库存/领用、资产卡片/报废/盘点、菜单
+  - include:
+      file: classpath:db/changelog/mysql/oa/oa_purchase.sql
+  - include:
+      file: classpath:db/changelog/mysql/oa/oa_asset.sql
+  - include:
+      file: classpath:db/changelog/mysql/oa/oa_purchase_menu.sql

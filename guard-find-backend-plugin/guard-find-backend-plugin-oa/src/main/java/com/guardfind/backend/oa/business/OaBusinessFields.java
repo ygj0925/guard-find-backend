@@ -25,6 +25,8 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -170,5 +172,116 @@ public final class OaBusinessFields {
 
     public static String plain(BigDecimal value) {
         return value.stripTrailingZeros().toPlainString();
+    }
+
+    /**
+     * 校验明细字段为必填可写的 table 并返回其列定义（按 key 索引）；不满足时记录错误并返回 null。
+     */
+    public static Map<String, JsonNode> tableColumns(Map<String, JsonNode> fields,
+                                                     String key,
+                                                     String label,
+                                                     String formName,
+                                                     List<String> errors) {
+        JsonNode table = fields.get(key);
+        if (table == null) {
+            errors.add(formName + "缺少字段 " + key + "（" + label + "，类型 table）");
+            return null;
+        }
+        if (!"table".equals(table.path("type").asText(""))) {
+            errors.add(formName + "字段 " + key + " 必须是 table 类型");
+            return null;
+        }
+        if (!table.path("required").asBoolean(false)) {
+            errors.add(formName + "字段 " + key + " 必须设为必填");
+        }
+        if (table.path("hidden").asBoolean(false) || table.path("readonly").asBoolean(false)) {
+            errors.add(formName + "字段 " + key + " 不能隐藏或只读");
+        }
+        Map<String, JsonNode> columns = new LinkedHashMap<>();
+        for (JsonNode column : table.path("columns")) {
+            columns.put(column.path("key").asText(""), column);
+        }
+        return columns;
+    }
+
+    public static void requireColumn(Map<String, JsonNode> columns,
+                                     String key,
+                                     Set<String> types,
+                                     boolean required,
+                                     String label,
+                                     String tableLabel,
+                                     List<String> errors) {
+        JsonNode column = columns.get(key);
+        String typeText = String.join("/", types);
+        if (column == null) {
+            if (required) {
+                errors.add(tableLabel + "缺少列 " + key + "（" + label + "，类型 " + typeText + "）");
+            }
+            return;
+        }
+        if (!types.contains(column.path("type").asText(""))) {
+            errors.add(tableLabel + "列 " + key + " 必须是 " + typeText + " 类型");
+        }
+        if (required && !column.path("required").asBoolean(false)) {
+            errors.add(tableLabel + "列 " + key + " 必须设为必填");
+        }
+    }
+
+    /**
+     * 取出明细的非空行（全空行忽略）；至少要有一行。
+     */
+    public static List<Map<?, ?>> rows(Object value, String label) {
+        if (value != null && !(value instanceof Collection<?>)) {
+            throw new BusinessException(label + "格式非法");
+        }
+        List<Map<?, ?>> rows = new ArrayList<>();
+        int index = 0;
+        for (Object row : value == null ? List.of() : (Collection<?>)value) {
+            index++;
+            if (!(row instanceof Map<?, ?> cells)) {
+                throw new BusinessException(label + "第 " + index + " 行格式非法");
+            }
+            boolean blank = true;
+            for (Object cell : cells.values()) {
+                if (text(cell) != null) {
+                    blank = false;
+                    break;
+                }
+            }
+            if (!blank) {
+                rows.add(cells);
+            }
+        }
+        if (rows.isEmpty()) {
+            throw new BusinessException("请至少填写一条" + label);
+        }
+        return rows;
+    }
+
+    /**
+     * 正整数数量，不超过 max。
+     */
+    public static int quantity(Object value, String label, int max) {
+        BigDecimal number;
+        if (value instanceof Number n) {
+            number = new BigDecimal(n.toString());
+        } else {
+            String text = text(value);
+            if (text == null) {
+                throw new BusinessException("请填写" + label);
+            }
+            try {
+                number = new BigDecimal(text);
+            } catch (NumberFormatException e) {
+                throw new BusinessException(label + "格式无效");
+            }
+        }
+        if (number.stripTrailingZeros().scale() > 0) {
+            throw new BusinessException(label + "必须是整数");
+        }
+        if (number.signum() <= 0 || number.compareTo(BigDecimal.valueOf(max)) > 0) {
+            throw new BusinessException(label + "必须在 1 到 " + max + " 之间");
+        }
+        return number.intValueExact();
     }
 }

@@ -61,7 +61,7 @@ public class OaTravelHook implements OaBusinessHook {
     public static final int MAX_DAYS = 90;
     public static final int MAX_BACKDATE_DAYS = 30;
 
-    static final Set<String> CLOSE_STATUSES = Set.of("REJECTED", "WITHDRAWN", "CANCELLED");
+    public static final Set<String> CLOSE_STATUSES = Set.of("REJECTED", "WITHDRAWN", "CANCELLED");
     private static final DateTimeFormatter NO_DATE = DateTimeFormatter.ofPattern("yyMMdd");
     private static final String FORM_NAME = "出差表单";
 

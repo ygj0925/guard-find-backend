@@ -109,7 +109,7 @@ public class OaStaffController {
     }
 
     @Operation(summary = "在职员工选项")
-    @SaCheckPermission(value = {"system:oa:employee:list", "system:oa:launch:list",
+    @SaCheckPermission(value = {"system:oa:employee:list", "system:oa:launch:list", "system:oa:asset:operate",
         "system:oa:form:list"}, mode = SaMode.OR)
     @GetMapping("/employee/options")
     public List<OaEmployeeOptionResp> employeeOptions(@RequestParam(required = false) String keyword) {

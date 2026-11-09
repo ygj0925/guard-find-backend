@@ -41,3 +41,7 @@ databaseChangeLog:
       file: db/changelog/mysql/oa/oa_travel.sql
   - include:
       file: db/changelog/mysql/oa/oa_attendance.sql
+  - include:
+      file: db/changelog/mysql/oa/oa_purchase.sql
+  - include:
+      file: db/changelog/mysql/oa/oa_asset.sql
