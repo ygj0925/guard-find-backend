@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS `oa_attendance_import` (
     `id`                   bigint(20)    AUTO_INCREMENT              COMMENT 'ID',
     `tenant_id`            bigint(20)    NOT NULL DEFAULT 0          COMMENT '租户ID',
     `request_id`           varchar(64)   NOT NULL                    COMMENT '请求号（幂等）',
+    `payload_digest`       char(64)      NOT NULL                    COMMENT '导入行 SHA-256（同请求号不同内容拒绝）',
     `file_name`            varchar(200)  DEFAULT NULL                COMMENT '来源文件名',
     `total_rows`           int           NOT NULL                    COMMENT '行数',
     `inserted_rows`        int           NOT NULL                    COMMENT '新增记录数',

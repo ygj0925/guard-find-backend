@@ -40,6 +40,7 @@ import com.guardfind.backend.oa.model.OaShiftReq;
 import com.guardfind.backend.oa.model.OaShiftResp;
 import com.guardfind.backend.oa.repository.OaAttendanceRepository;
 import com.guardfind.backend.oa.repository.OaAttendanceRepository.DateSpan;
+import com.guardfind.backend.oa.repository.OaAttendanceRepository.ImportReplay;
 import com.guardfind.backend.oa.repository.OaAttendanceRepository.LeaveSpan;
 import com.guardfind.backend.oa.repository.OaAttendanceRepository.RecordRow;
 import com.guardfind.backend.oa.repository.OaAttendanceRepository.RequestRow;
@@ -53,6 +54,9 @@ import org.springframework.transaction.support.TransactionTemplate;
 import top.continew.starter.core.exception.BusinessException;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
@@ -62,6 +66,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -263,15 +268,16 @@ public class OaAttendanceService {
     }
 
     /**
-     * 提交导入：同一请求号只生效一次；任一行有错整批拒绝；已补卡的一侧保留补卡结果。
+     * 提交导入：同一请求号只生效一次（内容不同则拒绝）；任一行有错整批拒绝；已补卡的一侧保留补卡结果。
      */
     public OaAttendanceImportResp commitImport(long tenantId, long operatorId, OaAttendanceImportReq req) {
         if (req.requestId() == null || req.requestId().isBlank()) {
             throw new BusinessException("缺少请求号");
         }
         String requestId = req.requestId().trim();
+        String digest = payloadDigest(req.rows());
         return transactionTemplate.execute(status -> {
-            OaAttendanceImportResp replay = repository.importByRequest(tenantId, requestId, false);
+            OaAttendanceImportResp replay = replay(repository.importByRequest(tenantId, requestId, false), digest);
             if (replay != null) {
                 return replay;
             }
@@ -282,10 +288,10 @@ public class OaAttendanceService {
             LocalDateTime now = LocalDateTime.now();
             long importId;
             try {
-                importId = repository.insertImport(tenantId, requestId, blankToNull(req.fileName()), req.rows()
+                importId = repository.insertImport(tenantId, requestId, digest, blankToNull(req.fileName()), req.rows()
                     .size(), operatorId, now);
             } catch (DuplicateKeyException e) {
-                return repository.importByRequest(tenantId, requestId, true);
+                return replay(repository.importByRequest(tenantId, requestId, true), digest);
             }
             int inserted = 0;
             int updated = 0;
@@ -782,6 +788,40 @@ public class OaAttendanceService {
 
     private static String blankToNull(String value) {
         return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private static OaAttendanceImportResp replay(ImportReplay existing, String digest) {
+        if (existing == null) {
+            return null;
+        }
+        if (!existing.payloadDigest().equals(digest)) {
+            throw new BusinessException("请求号已被使用");
+        }
+        return existing.result();
+    }
+
+    private static String payloadDigest(List<OaAttendanceImportRow> rows) {
+        StringBuilder text = new StringBuilder();
+        for (OaAttendanceImportRow row : rows) {
+            text.append(trimToEmpty(row.employeeNo()))
+                .append('\u001f')
+                .append(trimToEmpty(row.workDate()))
+                .append('\u001f')
+                .append(trimToEmpty(row.checkIn()))
+                .append('\u001f')
+                .append(trimToEmpty(row.checkOut()))
+                .append('\u001e');
+        }
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            return HexFormat.of().formatHex(digest.digest(text.toString().getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 不可用", e);
+        }
+    }
+
+    private static String trimToEmpty(String value) {
+        return value == null ? "" : value.trim();
     }
 
     private record ImportRow(long userId, LocalDate workDate, LocalDateTime checkIn, LocalDateTime checkOut) {

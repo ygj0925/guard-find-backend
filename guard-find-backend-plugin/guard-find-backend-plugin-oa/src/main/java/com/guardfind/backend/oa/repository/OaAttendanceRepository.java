@@ -429,18 +429,20 @@ public class OaAttendanceRepository {
             """, checkIn, checkOut, checkInSource, checkOutSource, importId, now, tenantId, id);
     }
 
-    public OaAttendanceImportResp importByRequest(long tenantId, String requestId, boolean lock) {
-        List<OaAttendanceImportResp> rows = jdbcTemplate.query("""
-            SELECT id, total_rows, inserted_rows, updated_rows, kept_corrections
+    public ImportReplay importByRequest(long tenantId, String requestId, boolean lock) {
+        List<ImportReplay> rows = jdbcTemplate.query("""
+            SELECT id, payload_digest, total_rows, inserted_rows, updated_rows, kept_corrections
               FROM oa_attendance_import WHERE tenant_id = ? AND request_id = ?
-            """ + (lock ? " FOR UPDATE" : ""), (rs, rowNum) -> new OaAttendanceImportResp(true, true, rs
-            .getLong("id"), rs.getInt("total_rows"), rs.getInt("inserted_rows"), rs.getInt("updated_rows"), rs
-                .getInt("kept_corrections"), List.of()), tenantId, requestId);
+            """ + (lock ? " FOR UPDATE" : ""), (rs, rowNum) -> new ImportReplay(rs
+            .getString("payload_digest"), new OaAttendanceImportResp(true, true, rs.getLong("id"), rs
+                .getInt("total_rows"), rs.getInt("inserted_rows"), rs.getInt("updated_rows"), rs
+                    .getInt("kept_corrections"), List.of())), tenantId, requestId);
         return rows.isEmpty() ? null : rows.get(0);
     }
 
     public long insertImport(long tenantId,
                              String requestId,
+                             String payloadDigest,
                              String fileName,
                              int totalRows,
                              long operatorId,
@@ -449,16 +451,17 @@ public class OaAttendanceRepository {
         jdbcTemplate.update(connection -> {
             PreparedStatement ps = connection.prepareStatement("""
                 INSERT INTO oa_attendance_import
-                  (tenant_id, request_id, file_name, total_rows, inserted_rows, updated_rows, kept_corrections,
-                   operator_id, create_time)
-                VALUES (?, ?, ?, ?, 0, 0, 0, ?, ?)
+                  (tenant_id, request_id, payload_digest, file_name, total_rows, inserted_rows, updated_rows,
+                   kept_corrections, operator_id, create_time)
+                VALUES (?, ?, ?, ?, ?, 0, 0, 0, ?, ?)
                 """, Statement.RETURN_GENERATED_KEYS);
             ps.setLong(1, tenantId);
             ps.setString(2, requestId);
-            ps.setString(3, fileName);
-            ps.setInt(4, totalRows);
-            ps.setLong(5, operatorId);
-            ps.setObject(6, now);
+            ps.setString(3, payloadDigest);
+            ps.setString(4, fileName);
+            ps.setInt(5, totalRows);
+            ps.setLong(6, operatorId);
+            ps.setObject(7, now);
             return ps;
         }, keyHolder);
         return requireKey(keyHolder);
@@ -727,5 +730,8 @@ public class OaAttendanceRepository {
     }
 
     public record UserInfo(String name, String employeeNo) {
+    }
+
+    public record ImportReplay(String payloadDigest, OaAttendanceImportResp result) {
     }
 }

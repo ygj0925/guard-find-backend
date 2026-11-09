@@ -93,6 +93,11 @@ public class OaCorrectionHook extends OaAttendanceHookSupport {
         if (workDate.isBefore(LocalDate.now().minusDays(MAX_BACKDATE_DAYS))) {
             throw new BusinessException("只能补 " + MAX_BACKDATE_DAYS + " 天内的卡");
         }
+        if (repository.scheduleRows(tenantId, List.of(applicantId), workDate, workDate)
+            .stream()
+            .noneMatch(schedule -> schedule.shiftId() != null)) {
+            throw new BusinessException(workDate + " 未排班或为休息日，无需补卡");
+        }
         repository.lockApplicant(tenantId, applicantId);
         YearMonth month = YearMonth.from(workDate);
         List<RequestRow> active = repository.activeCorrections(tenantId, applicantId, month.atDay(1), month
