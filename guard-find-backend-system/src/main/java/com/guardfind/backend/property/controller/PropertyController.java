@@ -24,6 +24,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -37,6 +38,7 @@ import top.continew.starter.ratelimiter.annotation.RateLimiter;
 import top.continew.starter.ratelimiter.enums.LimitType;
 
 import com.guardfind.backend.miniapp.context.MiniappUserContextHolder;
+import com.guardfind.backend.property.model.query.PropertyQuery;
 import com.guardfind.backend.property.model.req.PropertyReq;
 import com.guardfind.backend.property.model.resp.PropertyResp;
 import com.guardfind.backend.property.service.PropertyService;
@@ -63,17 +65,10 @@ public class PropertyController {
         return propertyService.create(userId, req);
     }
 
-    @Operation(summary = "房源广场", description = "已上架房源,支持城市/类型/租售筛选")
-    @Parameter(name = "city", description = "城市")
-    @Parameter(name = "propertyType", description = "house/apartment/villa/shop")
-    @Parameter(name = "priceType", description = "rent/sale")
+    @Operation(summary = "房源广场", description = "已上架房源,支持城市/类型/租售/模式、关键词、价格区间及排序")
     @GetMapping("/list")
-    public PageResp<PropertyResp> list(@RequestParam(required = false) String city,
-                                       @RequestParam(required = false) String propertyType,
-                                       @RequestParam(required = false) String priceType,
-                                       @RequestParam(required = false) String rentalMode,
-                                       PageQuery pageQuery) {
-        return propertyService.page(city, propertyType, priceType, rentalMode, pageQuery);
+    public PageResp<PropertyResp> list(@Valid @ModelAttribute PropertyQuery query, PageQuery pageQuery) {
+        return propertyService.page(query, pageQuery);
     }
 
     @Operation(summary = "我的房源", description = "含草稿/已下架")

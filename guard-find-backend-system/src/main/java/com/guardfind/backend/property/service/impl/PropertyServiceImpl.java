@@ -25,6 +25,7 @@ import com.guardfind.backend.miniapp.context.MiniappUserContextHolder;
 import com.guardfind.backend.miniapp.model.entity.MiniappUserDO;
 import com.guardfind.backend.property.mapper.PropertyMapper;
 import com.guardfind.backend.property.model.entity.PropertyDO;
+import com.guardfind.backend.property.model.query.PropertyQuery;
 import com.guardfind.backend.property.model.req.PropertyReq;
 import com.guardfind.backend.property.model.resp.PropertyManagerResp;
 import com.guardfind.backend.property.model.resp.PropertyResp;
@@ -85,19 +86,30 @@ public class PropertyServiceImpl implements PropertyService {
     }
 
     @Override
-    public PageResp<PropertyResp> page(String city,
-                                       String propertyType,
-                                       String priceType,
-                                       String rentalMode,
-                                       PageQuery pageQuery) {
-        Page<PropertyDO> page = propertyMapper.selectPage(new Page<>(pageNum(pageQuery), pageSize(pageQuery)), Wrappers
-            .<PropertyDO>lambdaQuery()
+    public PageResp<PropertyResp> page(PropertyQuery filters, PageQuery pageQuery) {
+        var wrapper = Wrappers.<PropertyDO>lambdaQuery()
             .eq(PropertyDO::getStatus, 2)
-            .eq(StrUtil.isNotBlank(city), PropertyDO::getCity, city)
-            .eq(StrUtil.isNotBlank(propertyType), PropertyDO::getPropertyType, propertyType)
-            .eq(StrUtil.isNotBlank(priceType), PropertyDO::getPriceType, priceType)
-            .eq(StrUtil.isNotBlank(rentalMode), PropertyDO::getRentalMode, rentalMode)
-            .orderByDesc(PropertyDO::getCreateTime, PropertyDO::getId));
+            .eq(StrUtil.isNotBlank(filters.getCity()), PropertyDO::getCity, filters.getCity())
+            .eq(StrUtil.isNotBlank(filters.getPropertyType()), PropertyDO::getPropertyType, filters.getPropertyType())
+            .eq(StrUtil.isNotBlank(filters.getPriceType()), PropertyDO::getPriceType, filters.getPriceType())
+            .eq(StrUtil.isNotBlank(filters.getRentalMode()), PropertyDO::getRentalMode, filters.getRentalMode())
+            .ge(filters.getMinPrice() != null, PropertyDO::getPrice, filters.getMinPrice())
+            .le(filters.getMaxPrice() != null, PropertyDO::getPrice, filters.getMaxPrice());
+        if (StrUtil.isNotBlank(filters.getKeyword())) {
+            String pattern = "%" + filters.getKeyword().replace("!", "!!").replace("%", "!%").replace("_", "!_") + "%";
+            wrapper.and(keyword -> keyword.apply("title LIKE {0} ESCAPE '!'", pattern)
+                .or()
+                .apply("community LIKE {0} ESCAPE '!'", pattern)
+                .or()
+                .apply("address LIKE {0} ESCAPE '!'", pattern));
+        }
+        if ("priceAsc".equals(filters.getSort())) {
+            wrapper.orderByAsc(PropertyDO::getPrice);
+        } else if ("priceDesc".equals(filters.getSort())) {
+            wrapper.orderByDesc(PropertyDO::getPrice);
+        }
+        wrapper.orderByDesc(PropertyDO::getCreateTime, PropertyDO::getId);
+        Page<PropertyDO> page = propertyMapper.selectPage(new Page<>(pageNum(pageQuery), pageSize(pageQuery)), wrapper);
         return toPage(page);
     }
 

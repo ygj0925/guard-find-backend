@@ -76,6 +76,23 @@ public class MiniappAuthController {
                 .equals(user.getIsPropertyManager()));
     }
 
+    public record ProfileReq(@NotBlank @Size(max = 64) String nickname,
+                             @NotNull @Size(max = 1024) @Pattern(regexp = "^$|^https?://[^\\s]+$") String avatar) {
+        public ProfileReq {
+            nickname = nickname == null ? null : nickname.strip();
+            avatar = avatar == null ? null : avatar.strip();
+        }
+    }
+
+    @PutMapping("/me")
+    public Map<String, Object> updateProfile(@Valid @RequestBody ProfileReq req) {
+        users.update(null, Wrappers.<MiniappUserDO>lambdaUpdate()
+            .eq(MiniappUserDO::getId, MiniappUserContextHolder.getUserIdRequired())
+            .set(MiniappUserDO::getNickname, req.nickname())
+            .set(MiniappUserDO::getAvatar, req.avatar()));
+        return me();
+    }
+
     @PostMapping("/logout")
     public void logout() {
         StpMiniappUtil.logout();

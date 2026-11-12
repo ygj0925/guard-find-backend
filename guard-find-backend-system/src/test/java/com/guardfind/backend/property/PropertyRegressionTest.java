@@ -26,6 +26,7 @@ import com.guardfind.backend.miniapp.model.entity.MiniappUserDO;
 import com.guardfind.backend.miniapp.service.MiniappNoticeService;
 import com.guardfind.backend.property.mapper.*;
 import com.guardfind.backend.property.model.entity.*;
+import com.guardfind.backend.property.model.query.PropertyQuery;
 import com.guardfind.backend.property.model.req.*;
 import com.guardfind.backend.property.service.PropertyInteractionService;
 import com.guardfind.backend.property.service.impl.*;
@@ -241,7 +242,10 @@ class PropertyRegressionTest {
     @Test
     void rentalModeFilterIsIncluded() {
         when(properties.selectPage(any(), any())).thenReturn(new Page<PropertyDO>());
-        service.page(null, null, "rent", "shared", null);
+        var query = new PropertyQuery();
+        query.setPriceType("rent");
+        query.setRentalMode("shared");
+        service.page(query, null);
         var cap = ArgumentCaptor.forClass(Wrapper.class);
         verify(properties).selectPage(any(), cap.capture());
         assertTrue(cap.getValue().getSqlSegment().contains("rental_mode"));

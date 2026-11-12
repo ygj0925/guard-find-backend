@@ -80,6 +80,8 @@ class MiniappAuthTest {
                     .preHandle(request("GET", path), new MockHttpServletResponse(), this));
             assertThrows(MiniappBizException.class, () -> auth
                 .preHandle(request("POST", "/miniapp/property/10"), new MockHttpServletResponse(), this));
+            assertThrows(MiniappBizException.class, () -> auth
+                .preHandle(request("PUT", "/miniapp/auth/me"), new MockHttpServletResponse(), this));
         }
     }
 

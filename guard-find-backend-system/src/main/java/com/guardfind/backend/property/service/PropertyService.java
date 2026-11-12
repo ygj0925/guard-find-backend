@@ -16,6 +16,7 @@
 
 package com.guardfind.backend.property.service;
 
+import com.guardfind.backend.property.model.query.PropertyQuery;
 import com.guardfind.backend.property.model.req.PropertyReq;
 import com.guardfind.backend.property.model.resp.PropertyResp;
 import top.continew.starter.extension.crud.model.query.PageQuery;
@@ -29,11 +30,7 @@ public interface PropertyService {
 
     Long create(Long userId, PropertyReq req);
 
-    PageResp<PropertyResp> page(String city,
-                                String propertyType,
-                                String priceType,
-                                String rentalMode,
-                                PageQuery pageQuery);
+    PageResp<PropertyResp> page(PropertyQuery query, PageQuery pageQuery);
 
     PageResp<PropertyResp> mine(Long userId, PageQuery pageQuery);
 
