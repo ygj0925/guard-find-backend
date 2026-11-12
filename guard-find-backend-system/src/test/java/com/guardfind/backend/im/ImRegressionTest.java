@@ -126,6 +126,43 @@ class ImRegressionTest {
         assertTrue(cap.getValue().getParamNameValuePairs().containsValue(9007199254740993L));
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(longs = {1L, 2L})
+    void returnedMessagesDecrementOnlyReadersUnreadWithCommaFreeAtomicExpression(Long userId) {
+        MiniappUserContextHolder.setUserId(userId);
+        when(conversations.lockById(10L)).thenReturn(conversation());
+        var message = new ImMessageDO();
+        message.setId(30L);
+        message.setSenderId(userId.equals(1L) ? 2L : 1L);
+        when(messages.selectList(any())).thenReturn(List.of(message));
+        when(messages.update(isNull(), any())).thenReturn(1);
+
+        service.messages(10L, null);
+
+        var messageCap = org.mockito.ArgumentCaptor
+            .forClass(com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper.class);
+        verify(messages).update(isNull(), messageCap.capture());
+        assertTrue(messageCap.getValue().getSqlSegment().contains("id IN"));
+        assertTrue(messageCap.getValue().getSqlSegment().contains("sender_id <>"));
+        assertTrue(messageCap.getValue().getSqlSegment().contains("is_read ="));
+        assertTrue(messageCap.getValue().getParamNameValuePairs().containsValue(30L));
+        var cap = org.mockito.ArgumentCaptor
+            .forClass(com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper.class);
+        verify(conversations).update(isNull(), cap.capture());
+        String column = userId.equals(1L) ? "unread_a" : "unread_b";
+        assertEquals(column + "=CASE WHEN " + column + ">1 THEN " + column + "-1 ELSE 0 END", cap.getValue()
+            .getSqlSet());
+        assertFalse(cap.getValue().getSqlSet().contains(","));
+        assertTrue(cap.getValue().getSqlSegment().contains("id ="));
+        assertTrue(cap.getValue().getParamNameValuePairs().containsValue(10L));
+        var statement = mock(org.apache.ibatis.mapping.MappedStatement.class);
+        when(statement.getParameterMap())
+            .thenReturn(new org.apache.ibatis.mapping.ParameterMap.Builder(new MybatisConfiguration(), "test", ImConversationDO.class, List
+                .of()).build());
+        var interceptor = new top.continew.starter.encrypt.field.interceptor.MyBatisEncryptInterceptor();
+        assertDoesNotThrow(() -> interceptor.beforeUpdate(null, statement, java.util.Map.of("ew", cap.getValue())));
+    }
+
     @Test
     void supportReadAcknowledgesOnlyReturnedIds() {
         var msg = new AdminMessageDO();

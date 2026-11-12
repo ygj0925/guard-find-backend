@@ -63,6 +63,7 @@ public class FileRecorderImpl implements FileRecorder {
         FileDO file = new FileDO(fileInfo);
         StorageDO storage = (StorageDO)fileInfo.getAttr().get(ClassUtil.getClassName(StorageDO.class, false));
         file.setStorageId(storage.getId());
+        file.setCreateUser((Long)fileInfo.getAttr().get("createUser"));
         fileMapper.insert(file);
         // 方便文件上传完成后获取文件信息
         fileInfo.setId(String.valueOf(file.getId()));

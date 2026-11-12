@@ -154,9 +154,10 @@ public class ImServiceImpl implements ImService {
                 .eq(ImMessageDO::getIsRead, 0)
                 .set(ImMessageDO::getIsRead, 1));
             String column = userId.equals(conv.getUserAId()) ? "unread_a" : "unread_b";
+            // SET 表达式不能含逗号，否则字段加密拦截器会将其拆成多个赋值。
             conversationMapper.update(null, Wrappers.<ImConversationDO>update()
                 .eq("id", conversationId)
-                .setSql(column + "=GREATEST(0," + column + "-" + read + ")"));
+                .setSql(column + "=CASE WHEN " + column + ">" + read + " THEN " + column + "-" + read + " ELSE 0 END"));
         }
         return msgs.stream().map(ImServiceImpl::toMsgResp).toList();
     }

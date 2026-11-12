@@ -149,6 +149,28 @@ class PropertyRegressionTest {
         assertEquals(1, service.detail(10L).getViewCount());
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(ints = {0, 7})
+    void detailCounterUsesCommaFreeAtomicExpressionCompatibleWithEncryptInterceptor(int count) {
+        var p = property(2);
+        p.setViewCount(count);
+        when(properties.selectById(10L)).thenReturn(p);
+        assertEquals(count + 1, service.detail(10L).getViewCount());
+        var cap = ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper.class);
+        verify(properties).update(isNull(), cap.capture());
+        assertEquals("view_count = CASE WHEN view_count IS NULL THEN 1 ELSE view_count + 1 END", cap.getValue()
+            .getSqlSet());
+        assertFalse(cap.getValue().getSqlSet().contains(","));
+        assertTrue(cap.getValue().getSqlSegment().contains("id ="));
+        assertTrue(cap.getValue().getParamNameValuePairs().containsValue(10L));
+        var statement = mock(org.apache.ibatis.mapping.MappedStatement.class);
+        when(statement.getParameterMap())
+            .thenReturn(new org.apache.ibatis.mapping.ParameterMap.Builder(new MybatisConfiguration(), "test", PropertyDO.class, List
+                .of()).build());
+        var interceptor = new top.continew.starter.encrypt.field.interceptor.MyBatisEncryptInterceptor();
+        assertDoesNotThrow(() -> interceptor.beforeUpdate(null, statement, java.util.Map.of("ew", cap.getValue())));
+    }
+
     @Test
     void updateClearsImagesAndOptionalFieldsAndSavesStatus() {
         var p = property(2);

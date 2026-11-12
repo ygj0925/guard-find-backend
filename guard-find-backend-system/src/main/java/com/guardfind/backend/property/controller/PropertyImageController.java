@@ -42,16 +42,18 @@ public class PropertyImageController {
     @PostMapping("/miniapp/property/images")
     @RateLimiter(name = "MINIAPP:PROPERTY:IMAGE", rate = 30, interval = 60, type = LimitType.IP)
     public Map<String, String> miniapp(@RequestPart("file") MultipartFile file) throws IOException {
-        return upload(file, "miniapp/" + MiniappUserContextHolder.getUserIdRequired());
+        Long createUser = MiniappUserContextHolder.getUserIdRequired();
+        return upload(file, "miniapp/" + createUser, createUser);
     }
 
     @PostMapping("/system/property/images")
     @SaCheckPermission(value = {"system:property:create", "system:property:update"}, mode = SaMode.OR)
     public Map<String, String> admin(@RequestPart("file") MultipartFile file) throws IOException {
-        return upload(file, "admin/" + StpUtil.getLoginIdAsLong());
+        Long createUser = StpUtil.getLoginIdAsLong();
+        return upload(file, "admin/" + createUser, createUser);
     }
 
-    private Map<String, String> upload(MultipartFile file, String actor) throws IOException {
+    private Map<String, String> upload(MultipartFile file, String actor, Long createUser) throws IOException {
         if (file.isEmpty() || file.getSize() > 5 * 1024 * 1024)
             throw new BusinessException("请选择不超过5MB的图片");
         String name = file.getOriginalFilename();
@@ -74,7 +76,8 @@ public class PropertyImageController {
                 reader.dispose();
             }
         }
-        var info = files.upload(file, "property/" + actor + "/" + LocalDate.now() + "/");
+        String serverSelectedPath = "property/" + actor + "/" + LocalDate.now() + "/";
+        var info = files.upload(file, serverSelectedPath, null, createUser);
         if (info == null || info.getUrl() == null || !info.getUrl().matches("^https?://[^\\s]+$"))
             throw new BusinessException("请先在后台存储管理中配置图片的公网访问地址");
         return Map.of("url", info.getUrl());

@@ -16,8 +16,11 @@
 
 package com.guardfind.backend.property;
 
+import cn.dev33.satoken.stp.StpUtil;
+import com.guardfind.backend.common.context.UserContextHolder;
 import com.guardfind.backend.property.controller.PropertyImageController;
 import com.guardfind.backend.miniapp.context.MiniappUserContextHolder;
+import com.guardfind.backend.miniapp.exception.MiniappBizException;
 import com.guardfind.backend.system.service.FileService;
 import org.dromara.x.file.storage.core.FileInfo;
 import org.junit.jupiter.api.*;
@@ -63,14 +66,47 @@ class PropertyImageTest {
     }
 
     @Test
-    void writesValidImageToUserDirectoryAndReturnsPublicUrl() throws Exception {
-        var bytes = new ByteArrayOutputStream();
-        ImageIO.write(new BufferedImage(1, 1, BufferedImage.TYPE_INT_RGB), "png", bytes);
-        var file = new MockMultipartFile("file", "a.png", "image/png", bytes.toByteArray());
+    void writesValidImageWithCurrentMiniappCreatorAndReturnsPublicUrl() throws Exception {
+        MiniappUserContextHolder.setUserId(42L);
+        var file = validImage();
         var info = new FileInfo();
         info.setUrl("https://example.com/a.png");
-        when(storage.upload(eq(file), anyString())).thenReturn(info);
-        assertEquals("https://example.com/a.png", controller.miniapp(file).get("url"));
-        verify(storage).upload(eq(file), startsWith("property/miniapp/1/"));
+        when(storage.upload(eq(file), anyString(), isNull(), eq(42L))).thenReturn(info);
+        try (var backend = mockStatic(UserContextHolder.class)) {
+            assertEquals("https://example.com/a.png", controller.miniapp(file).get("url"));
+            verify(storage).upload(eq(file), startsWith("property/miniapp/42/"), isNull(), eq(42L));
+            verifyNoMoreInteractions(storage);
+            backend.verifyNoInteractions();
+        }
+    }
+
+    @Test
+    void rejectsUnauthenticatedMiniappWithoutWritingStorage() throws Exception {
+        MiniappUserContextHolder.clear();
+        var file = validImage();
+        assertThrows(MiniappBizException.class, () -> controller.miniapp(file));
+        verifyNoInteractions(storage);
+    }
+
+    @Test
+    void adminUsesBackendLoginIdInsteadOfMiniappIdentity() throws Exception {
+        var file = validImage();
+        var info = new FileInfo();
+        info.setUrl("https://example.com/a.png");
+        when(storage.upload(eq(file), anyString(), isNull(), eq(99L))).thenReturn(info);
+        try (var backend = mockStatic(StpUtil.class)) {
+            backend.when(StpUtil::getLoginIdAsLong).thenReturn(99L);
+            assertEquals("https://example.com/a.png", controller.admin(file).get("url"));
+            verify(storage).upload(eq(file), startsWith("property/admin/99/"), isNull(), eq(99L));
+            verifyNoMoreInteractions(storage);
+            backend.verify(StpUtil::getLoginIdAsLong);
+            backend.verifyNoMoreInteractions();
+        }
+    }
+
+    private MockMultipartFile validImage() throws Exception {
+        var bytes = new ByteArrayOutputStream();
+        ImageIO.write(new BufferedImage(1, 1, BufferedImage.TYPE_INT_RGB), "png", bytes);
+        return new MockMultipartFile("file", "a.png", "image/png", bytes.toByteArray());
     }
 }

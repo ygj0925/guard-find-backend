@@ -133,10 +133,10 @@ public class PropertyServiceImpl implements PropertyService {
             .getUserId()))) {
             throw new BusinessException("房源不存在或未上架");
         }
-        // 浏览计数自增
+        // SET 表达式不能含逗号，否则字段加密拦截器会将其拆成多个赋值。
         propertyMapper.update(null, Wrappers.<PropertyDO>update()
             .eq("id", id)
-            .setSql("view_count = COALESCE(view_count, 0) + 1"));
+            .setSql("view_count = CASE WHEN view_count IS NULL THEN 1 ELSE view_count + 1 END"));
         property.setViewCount((property.getViewCount() == null ? 0 : property.getViewCount()) + 1);
         PropertyResp resp = toResp(property);
         MiniappUserDO owner = property.getUserId() == null ? null : appUserMapper.selectById(property.getUserId());

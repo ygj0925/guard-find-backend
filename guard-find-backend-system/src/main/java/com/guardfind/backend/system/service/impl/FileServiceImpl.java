@@ -106,14 +106,19 @@ public class FileServiceImpl extends BaseServiceImpl<FileMapper, FileDO, FileRes
 
     @Override
     public FileInfo upload(MultipartFile file, String parentPath, String storageCode) {
+        return this.upload(file, parentPath, storageCode, UserContextHolder.getUserId());
+    }
+
+    @Override
+    public FileInfo upload(MultipartFile file, String parentPath, String storageCode, Long createUser) {
         return this.upload(file, parentPath, storageCode, StrUtil.nullToEmpty(FileNameUtil.extName(file
-            .getOriginalFilename())).toLowerCase(java.util.Locale.ROOT));
+            .getOriginalFilename())).toLowerCase(java.util.Locale.ROOT), createUser);
     }
 
     @Override
     public FileInfo upload(File file, String parentPath, String storageCode) {
         return this.upload(file, parentPath, storageCode, StrUtil.nullToEmpty(FileNameUtil.extName(file.getName()))
-            .toLowerCase(java.util.Locale.ROOT));
+            .toLowerCase(java.util.Locale.ROOT), UserContextHolder.getUserId());
     }
 
     @Override
@@ -222,9 +227,10 @@ public class FileServiceImpl extends BaseServiceImpl<FileMapper, FileDO, FileRes
      * @param parentPath  上级目录
      * @param storageCode 存储引擎编码
      * @param extName     文件扩展名
+     * @param createUser  创建人 ID
      * @return 文件信息
      */
-    private FileInfo upload(Object file, String parentPath, String storageCode, String extName) {
+    private FileInfo upload(Object file, String parentPath, String storageCode, String extName, Long createUser) {
         List<String> allExtensions = FileTypeEnum.getAllExtensions();
         CheckUtils.throwIf(!allExtensions.contains(extName), "不支持的文件类型，仅支持 {} 格式的文件", String
             .join(StringConstants.COMMA, allExtensions));
@@ -233,7 +239,7 @@ public class FileServiceImpl extends BaseServiceImpl<FileMapper, FileDO, FileRes
         CheckUtils.throwIf(DisEnableStatusEnum.DISABLE.equals(storage.getStatus()), "请先启用存储 [{}]", storage.getCode());
 
         // 创建父级目录
-        this.createParentDir(parentPath, storage);
+        this.createParentDir(parentPath, storage, createUser);
 
         // 生成唯一文件名（处理重名情况）
         String originalFileName = getOriginalFileName(file);
@@ -244,6 +250,7 @@ public class FileServiceImpl extends BaseServiceImpl<FileMapper, FileDO, FileRes
             .setPlatform(storage.getCode())
             .setHashCalculatorSha256(true)
             .putAttr(ClassUtil.getClassName(StorageDO.class, false), storage)
+            .putAttr("createUser", createUser)
             .setPath(this.pretreatmentPath(parentPath))
             .setSaveFilename(uniqueFileName)
             .setOriginalFilename(uniqueFileName);
@@ -319,6 +326,10 @@ public class FileServiceImpl extends BaseServiceImpl<FileMapper, FileDO, FileRes
      */
     @Override
     public void createParentDir(String parentPath, StorageDO storage) {
+        this.createParentDir(parentPath, storage, UserContextHolder.getUserId());
+    }
+
+    private void createParentDir(String parentPath, StorageDO storage, Long createUser) {
         String lockKey = StrUtil.format("Lock:{}:{}", storage.getCode(), parentPath);
         try (RedisLockUtils lock = RedisLockUtils.tryLock(lockKey)) {
             if (!lock.isLocked()) {
@@ -356,6 +367,7 @@ public class FileServiceImpl extends BaseServiceImpl<FileMapper, FileDO, FileRes
                 file.setParentPath(lastPath);
                 file.setType(FileTypeEnum.DIR);
                 file.setStorageId(storage.getId());
+                file.setCreateUser(createUser);
                 baseMapper.insert(file);
             }
         }

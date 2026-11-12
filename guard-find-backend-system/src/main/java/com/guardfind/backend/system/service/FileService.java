@@ -76,6 +76,8 @@ public interface FileService extends BaseService<FileResp, FileResp, FileQuery, 
      */
     FileInfo upload(MultipartFile file, String parentPath, String storageCode) throws IOException;
 
+    FileInfo upload(MultipartFile file, String parentPath, String storageCode, Long createUser) throws IOException;
+
     /**
      * 上传到默认存储
      *
