@@ -68,7 +68,7 @@ class PropertyRegressionTest {
         bookings = mock(PropertyBookingMapper.class);
         notices = mock(MiniappNoticeService.class);
         interactions = mock(PropertyInteractionService.class);
-        service = new PropertyServiceImpl(properties, users, interactions);
+        service = new PropertyServiceImpl(properties, users, interactions, mock(com.guardfind.backend.property.service.PropertyHomeService.class));
         interaction = new PropertyInteractionServiceImpl(properties, favorites, history, bookings, users, notices);
         // 2L 默认是房源管家:发布/编辑/上下架在小程序侧都要求管家身份(房源仅运营方维护)
         when(users.selectById(2L)).thenReturn(publisher(2L, true));
@@ -197,6 +197,116 @@ class PropertyRegressionTest {
         var cap = ArgumentCaptor.forClass(PropertyDO.class);
         verify(properties).insert(cap.capture());
         assertNull(cap.getValue().getRentalMode());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"whole,month", "shared,month", "room,month", "short,day"})
+    void rentalModesDefaultToMatchingUnits(String mode, String unit) {
+        var r = req();
+        r.setRentalMode(mode);
+        service.createForAdmin(null, r);
+        var cap = ArgumentCaptor.forClass(PropertyDO.class);
+        verify(properties).insert(cap.capture());
+        assertEquals(unit, cap.getValue().getPriceUnit());
+        assertEquals(mode, cap.getValue().getRentalMode());
+        assertFalse(cap.getValue().isRecommended());
+        assertEquals(unit, com.guardfind.backend.property.support.PropertyRespAssembler.toResp(cap.getValue()).getPriceUnit());
+    }
+
+    @Test
+    void changingShortToMonthlyAndSaleClearsStaleUnitsWithoutChangingRecommendation() {
+        var p = property(2);
+        p.setRentalMode("short");
+        p.setPriceUnit("day");
+        p.setRecommended(true);
+        when(properties.lockById(10L)).thenReturn(p);
+        var r = req();
+        r.setRentalMode("room");
+        service.update(10L, 2L, r);
+        assertEquals("month", p.getPriceUnit());
+        assertTrue(p.isRecommended());
+        r.setPriceType("sale");
+        service.update(10L, 2L, r);
+        assertNull(p.getPriceUnit());
+        assertNull(p.getRentalMode());
+        assertTrue(com.guardfind.backend.property.support.PropertyRespAssembler.toResp(p).isRecommended());
+    }
+
+    @Test
+    void mismatchedUnitsAreRejectedByValidationAndService() {
+        try (var factory = Validation.buildDefaultValidatorFactory()) {
+            for (var pair : List.of(List.of("short", "month"), List.of("room", "day"), List.of("whole", "day"))) {
+                var r = req();
+                r.setRentalMode(pair.get(0));
+                r.setPriceUnit(pair.get(1));
+                assertFalse(factory.getValidator().validate(r).isEmpty());
+                assertThrows(BusinessException.class, () -> service.createForAdmin(null, r));
+            }
+            var r = req();
+            r.setPriceType("sale");
+            r.setPriceUnit("month");
+            assertFalse(factory.getValidator().validate(r).isEmpty());
+            assertThrows(BusinessException.class, () -> service.createForAdmin(null, r));
+            r.setPriceUnit(null);
+            assertTrue(factory.getValidator().validate(r).isEmpty());
+            r.setPriceType("rent");
+            r.setRentalMode("short");
+            r.setPriceUnit("day");
+            assertTrue(factory.getValidator().validate(r).isEmpty());
+        }
+        verify(properties, never()).insert(any(PropertyDO.class));
+    }
+
+    @Test
+    void normalRequestCannotSetRecommendedAndStatusEndpointCan() throws Exception {
+        assertFalse(java.util.Arrays.stream(PropertyReq.class.getDeclaredFields()).anyMatch(f -> f.getName().equals("recommended")));
+        var mapper = new com.fasterxml.jackson.databind.ObjectMapper()
+            .disable(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
+        var r = mapper.readValue("{\"title\":\"房源\",\"address\":\"地址\",\"propertyType\":\"house\",\"priceType\":\"rent\",\"price\":10,\"status\":2,\"recommended\":true}", PropertyReq.class);
+        service.createForAdmin(null, r);
+        var inserted = ArgumentCaptor.forClass(PropertyDO.class);
+        verify(properties).insert(inserted.capture());
+        assertFalse(inserted.getValue().isRecommended());
+        when(properties.lockById(10L)).thenReturn(property(2));
+        service.updateRecommendedForAdmin(10L, true);
+        var update = ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper.class);
+        verify(properties).update(isNull(), update.capture());
+        assertTrue(update.getValue().getSqlSet().contains("recommended"));
+        assertTrue(update.getValue().getParamNameValuePairs().containsValue(true));
+        assertThrows(BusinessException.class, () -> service.updateRecommendedForAdmin(99L, true));
+    }
+
+    @Test
+    void listingFavoritesAreFilledInOneBatchForLoggedInViewer() {
+        MiniappUserContextHolder.setUserId(1L);
+        var second = property(2);
+        second.setId(11L);
+        var page = new Page<PropertyDO>();
+        page.setRecords(List.of(property(2), second));
+        when(properties.selectPage(any(), any())).thenReturn(page);
+        when(interactions.favoritedIds(1L, List.of(10L, 11L))).thenReturn(java.util.Set.of(11L));
+        var list = service.page(new PropertyQuery(), null).getList();
+        assertFalse(list.getFirst().getIsFavorited());
+        assertTrue(list.getLast().getIsFavorited());
+        verify(interactions).favoritedIds(1L, List.of(10L, 11L));
+        verify(interactions, never()).isFavorited(anyLong(), anyLong());
+        MiniappUserContextHolder.clear();
+        assertNull(service.page(new PropertyQuery(), null).getList().getFirst().getIsFavorited());
+    }
+
+    @Test
+    void favoriteBatchQueryIsScopedToUserAndCurrentPage() {
+        var f = new PropertyFavoriteDO();
+        f.setPropertyId(10L);
+        when(favorites.selectList(any())).thenReturn(List.of(f));
+        assertEquals(java.util.Set.of(10L), interaction.favoritedIds(1L, List.of(10L, 11L)));
+        var query = ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper.class);
+        verify(favorites).selectList(query.capture());
+        assertTrue(query.getValue().getSqlSegment().contains("user_id"));
+        assertTrue(query.getValue().getSqlSegment().contains("property_id IN"));
+        assertTrue(query.getValue().getParamNameValuePairs().containsValue(1L));
+        assertTrue(interaction.favoritedIds(null, List.of(10L)).isEmpty());
+        assertTrue(interaction.favoritedIds(1L, List.of()).isEmpty());
     }
 
     @Test

@@ -104,6 +104,18 @@ public class PropertyInteractionServiceImpl implements PropertyInteractionServic
     }
 
     @Override
+    public java.util.Set<Long> favoritedIds(Long userId, List<Long> propertyIds) {
+        if (userId == null || propertyIds.isEmpty()) {
+            return java.util.Set.of();
+        }
+        return favoriteMapper.selectList(Wrappers.<PropertyFavoriteDO>lambdaQuery()
+            .select(PropertyFavoriteDO::getPropertyId)
+            .eq(PropertyFavoriteDO::getUserId, userId)
+            .in(PropertyFavoriteDO::getPropertyId, propertyIds))
+            .stream().map(PropertyFavoriteDO::getPropertyId).collect(Collectors.toSet());
+    }
+
+    @Override
     public PageResp<PropertyResp> favorites(Long userId, PageQuery pageQuery) {
         Page<PropertyDO> page = propertyMapper
             .favoritePage(new Page<>(pageNum(pageQuery), pageSize(pageQuery)), userId);
@@ -114,7 +126,10 @@ public class PropertyInteractionServiceImpl implements PropertyInteractionServic
 
     @Override
     public PageResp<PropertyResp> history(Long userId, PageQuery pageQuery) {
-        return propertyPage(propertyMapper.historyPage(new Page<>(pageNum(pageQuery), pageSize(pageQuery)), userId));
+        var result = propertyPage(propertyMapper.historyPage(new Page<>(pageNum(pageQuery), pageSize(pageQuery)), userId));
+        var ids = favoritedIds(userId, result.getList().stream().map(PropertyResp::getId).toList());
+        result.getList().forEach(p -> p.setIsFavorited(ids.contains(p.getId())));
+        return result;
     }
 
     @Override

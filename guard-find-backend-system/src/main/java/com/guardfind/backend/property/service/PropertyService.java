@@ -52,6 +52,8 @@ public interface PropertyService {
      */
     void updateStatusForAdmin(Long id, Integer status);
 
+    void updateRecommendedForAdmin(Long id, boolean recommended);
+
     /**
      * 后台:删除房源。
      */

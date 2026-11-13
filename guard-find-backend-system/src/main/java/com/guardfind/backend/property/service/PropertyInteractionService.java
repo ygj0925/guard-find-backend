@@ -37,6 +37,8 @@ public interface PropertyInteractionService {
      */
     boolean isFavorited(Long userId, Long propertyId);
 
+    java.util.Set<Long> favoritedIds(Long userId, java.util.List<Long> propertyIds);
+
     /**
      * 我的收藏(收藏时间倒序)。
      */

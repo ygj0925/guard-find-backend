@@ -37,6 +37,8 @@ databaseChangeLog:
       file: db/changelog/mysql/property_optional_owner.sql
   - include:
       file: db/changelog/mysql/property_publisher_manager.sql
+  - include:
+      file: db/changelog/mysql/property_home.sql
   # Flowable 7.2.0 流程引擎表：由 Liquibase 托管，应用不使用引擎自动建表
   - include:
       file: classpath:db/changelog/mysql/oa/oa_engine_common.sql

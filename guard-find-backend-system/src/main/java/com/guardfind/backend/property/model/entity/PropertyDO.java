@@ -59,9 +59,12 @@ public class PropertyDO extends BaseDO {
     private String community;
     @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private java.time.LocalDate availableFrom;
-    /** 租赁方式(whole=整租/shared=合租;仅出租) */
+    /** 租赁方式(whole/shared/room/short;仅出租) */
     @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String rentalMode;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private String priceUnit;
+    private boolean recommended;
     private String address;
     @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String district;

@@ -87,8 +87,19 @@ public class PropertyReq implements Serializable {
     @Length(max = 100)
     private String community;
     private java.time.LocalDate availableFrom;
-    @Pattern(regexp = "^(whole|shared)$", message = "租赁方式取值不合法")
+    @Pattern(regexp = "^(whole|shared|room|short)$", message = "租赁方式取值不合法")
     private String rentalMode;
+    @Pattern(regexp = "^(month|day)$", message = "价格单位取值不合法")
+    private String priceUnit;
+
+    @AssertTrue(message = "价格单位与租售类型或租赁方式不匹配")
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    @Schema(hidden = true)
+    public boolean isPriceUnitValid() {
+        return priceUnit == null || "rent".equals(priceType)
+            && ("short".equals(rentalMode) ? "day" : "month").equals(priceUnit);
+    }
+
     @NotBlank(message = "地址不能为空")
     @Length(max = 200)
     private String address;

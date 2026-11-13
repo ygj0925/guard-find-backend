@@ -51,8 +51,11 @@ public class PropertyResp implements Serializable {
     private String community;
     /** 可入住日期 */
     private java.time.LocalDate availableFrom;
-    /** 租赁方式(whole=整租/shared=合租;仅出租) */
+    /** 租赁方式(whole/shared/room/short;仅出租) */
     private String rentalMode;
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.ALWAYS)
+    private String priceUnit;
+    private boolean recommended;
     private String address;
     private String district;
     private String city;
@@ -61,7 +64,7 @@ public class PropertyResp implements Serializable {
     private String contactPhone;
     private Integer status;
     private Integer viewCount;
-    /** 当前登录用户是否已收藏(仅详情接口回填;未登录为 null) */
+    /** 当前登录用户是否已收藏;未登录为 null */
     private Boolean isFavorited;
     private List<String> images;
     private LocalDateTime createTime;

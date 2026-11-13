@@ -48,6 +48,8 @@ public final class PropertyRespAssembler {
         resp.setCommunity(property.getCommunity());
         resp.setAvailableFrom(property.getAvailableFrom());
         resp.setRentalMode(property.getRentalMode());
+        resp.setPriceUnit(property.getPriceUnit());
+        resp.setRecommended(property.isRecommended());
         resp.setAddress(property.getAddress());
         resp.setDistrict(property.getDistrict());
         resp.setCity(property.getCity());

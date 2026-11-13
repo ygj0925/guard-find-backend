@@ -77,6 +77,12 @@ public class PropertyAdminController {
         propertyService.updateStatusForAdmin(id, status);
     }
 
+    @SaCheckPermission("system:property:status")
+    @PostMapping("/{id}/recommended")
+    public void updateRecommended(@PathVariable Long id, @RequestParam boolean recommended) {
+        propertyService.updateRecommendedForAdmin(id, recommended);
+    }
+
     @Operation(summary = "删除房源", description = "后台强制删除")
     @Parameter(name = "id", description = "房源 ID", required = true)
     @SaCheckPermission("system:property:delete")

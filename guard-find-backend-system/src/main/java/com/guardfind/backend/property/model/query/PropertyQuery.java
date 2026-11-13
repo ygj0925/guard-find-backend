@@ -53,9 +53,15 @@ public class PropertyQuery implements Serializable {
     @Pattern(regexp = "^(rent|sale)?$", message = "价格类型取值不合法")
     private String priceType;
 
-    @Schema(description = "租赁方式(whole/shared)")
-    @Pattern(regexp = "^(whole|shared)?$", message = "租赁方式取值不合法")
+    @Schema(description = "租赁方式(whole/shared/room/short)")
+    @Pattern(regexp = "^(whole|shared|room|short)?$", message = "租赁方式取值不合法")
     private String rentalMode;
+
+    @Pattern(regexp = "^(month|day)$", message = "价格单位取值不合法")
+    private String priceUnit;
+    private Boolean recommended;
+    @Pattern(regexp = "^[a-z0-9-]{1,40}$", message = "活动 ID 格式不合法")
+    private String activityId;
 
     @Schema(description = "标题/小区/地址关键词")
     @Size(max = 64, message = "关键词不能超过 {max} 个字符")

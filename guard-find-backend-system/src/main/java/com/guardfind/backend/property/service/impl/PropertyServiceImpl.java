@@ -30,6 +30,7 @@ import com.guardfind.backend.property.model.req.PropertyReq;
 import com.guardfind.backend.property.model.resp.PropertyManagerResp;
 import com.guardfind.backend.property.model.resp.PropertyResp;
 import com.guardfind.backend.property.service.PropertyInteractionService;
+import com.guardfind.backend.property.service.PropertyHomeService;
 import com.guardfind.backend.property.service.PropertyService;
 import com.guardfind.backend.property.support.PropertyRespAssembler;
 import lombok.RequiredArgsConstructor;
@@ -55,6 +56,7 @@ public class PropertyServiceImpl implements PropertyService {
     private final PropertyMapper propertyMapper;
     private final MiniappUserMapper appUserMapper;
     private final PropertyInteractionService interactionService;
+    private final PropertyHomeService homeService;
 
     @Override
     public Long create(Long userId, PropertyReq req) {
@@ -89,12 +91,23 @@ public class PropertyServiceImpl implements PropertyService {
     public PageResp<PropertyResp> page(PropertyQuery filters, PageQuery pageQuery) {
         var wrapper = Wrappers.<PropertyDO>lambdaQuery()
             .eq(PropertyDO::getStatus, 2)
+            .eq(PropertyDO::getDeleted, 0L)
+            .eq(Boolean.TRUE.equals(filters.getRecommended()), PropertyDO::isRecommended, true)
+            .eq(filters.getPriceUnit() != null, PropertyDO::getPriceUnit, filters.getPriceUnit())
             .eq(StrUtil.isNotBlank(filters.getCity()), PropertyDO::getCity, filters.getCity())
             .eq(StrUtil.isNotBlank(filters.getPropertyType()), PropertyDO::getPropertyType, filters.getPropertyType())
             .eq(StrUtil.isNotBlank(filters.getPriceType()), PropertyDO::getPriceType, filters.getPriceType())
             .eq(StrUtil.isNotBlank(filters.getRentalMode()), PropertyDO::getRentalMode, filters.getRentalMode())
             .ge(filters.getMinPrice() != null, PropertyDO::getPrice, filters.getMinPrice())
             .le(filters.getMaxPrice() != null, PropertyDO::getPrice, filters.getMaxPrice());
+        if (filters.getActivityId() != null) {
+            var ids = homeService.requireActivePropertyIds(filters.getActivityId());
+            if (ids.isEmpty()) {
+                wrapper.apply("1 = 0");
+            } else {
+                wrapper.in(PropertyDO::getId, ids);
+            }
+        }
         if (StrUtil.isNotBlank(filters.getKeyword())) {
             String pattern = "%" + filters.getKeyword().replace("!", "!!").replace("%", "!%").replace("_", "!_") + "%";
             wrapper.and(keyword -> keyword.apply("title LIKE {0} ESCAPE '!'", pattern)
@@ -209,6 +222,16 @@ public class PropertyServiceImpl implements PropertyService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    public void updateRecommendedForAdmin(Long id, boolean recommended) {
+        if (propertyMapper.lockById(id) == null) {
+            throw new BusinessException("房源不存在");
+        }
+        propertyMapper.update(null, Wrappers.<PropertyDO>lambdaUpdate()
+            .eq(PropertyDO::getId, id).set(PropertyDO::isRecommended, recommended));
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
     public void deleteForAdmin(Long id) {
         if (propertyMapper.lockById(id) == null) {
             throw new BusinessException("房源不存在");
@@ -283,6 +306,11 @@ public class PropertyServiceImpl implements PropertyService {
     }
 
     private void applyReq(PropertyDO property, PropertyReq req) {
+        if (!req.isPriceUnitValid()) {
+            throw new BusinessException("价格单位与租售类型或租赁方式不匹配");
+        }
+        property.setPriceUnit("rent".equals(req.getPriceType())
+            ? ("short".equals(req.getRentalMode()) ? "day" : "month") : null);
         property.setTitle(StrUtil.trim(req.getTitle()));
         property.setDescription(StrUtil.trimToNull(req.getDescription()));
         property.setPropertyType(req.getPropertyType());
@@ -336,8 +364,14 @@ public class PropertyServiceImpl implements PropertyService {
             : appUserMapper.selectByIds(userIds)
                 .stream()
                 .collect(Collectors.toMap(MiniappUserDO::getId, Function.identity()));
+        Long viewerId = MiniappUserContextHolder.getUserId();
+        var favorites = viewerId == null || page.getRecords().isEmpty() ? java.util.Set.<Long>of()
+            : interactionService.favoritedIds(viewerId, page.getRecords().stream().map(PropertyDO::getId).toList());
         List<PropertyResp> list = page.getRecords().stream().map(property -> {
             PropertyResp resp = toResp(property);
+            if (viewerId != null) {
+                resp.setIsFavorited(favorites.contains(property.getId()));
+            }
             MiniappUserDO user = property.getUserId() == null ? null : users.get(property.getUserId());
             if (user != null) {
                 fillOwner(resp, user);
