@@ -17,6 +17,7 @@
 package com.guardfind.backend.oa.repository;
 
 import com.guardfind.backend.oa.model.OaDoneRecordResp;
+import com.guardfind.backend.oa.model.OaTodoTaskResp;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
@@ -112,6 +113,55 @@ public class OaApprovalRepository {
              WHERE tenant_id = ? AND id = ? AND status = 'RUNNING' AND deleted = 0
             """, actorId, now, tenantId, applicationId);
     }
+
+    /** Query the full active-task set before keyword filtering, counting and pagination. */
+    public TodoPage todoPage(long tenantId, long userId, Map<Long, String> actors, String keyword, int page, int size) {
+        // IDs come from authenticated users/delegations, never from a SQL fragment supplied by a client.
+        StringBuilder access = new StringBuilder("CASE");
+        for (Long actor : actors.keySet()) {
+            String id = Long.toString(actor);
+            access.append(" WHEN t.ASSIGNEE_ = '").append(id)
+                .append("' OR (t.ASSIGNEE_ IS NULL AND EXISTS (SELECT 1 FROM ACT_RU_IDENTITYLINK l")
+                .append(" WHERE l.TASK_ID_ = t.ID_ AND l.TYPE_ = 'candidate' AND l.USER_ID_ = '")
+                .append(id).append("')) THEN ").append(id);
+        }
+        access.append(" ELSE NULL END");
+        String from = """
+             FROM oa_application a
+             JOIN (SELECT t.*, %s AS access_user FROM ACT_RU_TASK t WHERE t.TENANT_ID_ = ?) t
+               ON t.PROC_INST_ID_ = a.process_instance_id
+            """.formatted(access);
+        StringBuilder where = new StringBuilder(" WHERE a.tenant_id = ? AND a.deleted = 0 AND t.access_user IS NOT NULL");
+        List<Object> args = new ArrayList<>();
+        args.add(Long.toString(tenantId));
+        args.add(tenantId);
+        appendKeyword(where, args, keyword);
+        Long total = jdbcTemplate.queryForObject("SELECT COUNT(*)" + from + where, Long.class, args.toArray());
+        String joins = """
+             LEFT JOIN oa_process_release r ON r.tenant_id = a.tenant_id AND r.id = a.release_id
+             LEFT JOIN oa_process_model m ON m.tenant_id = r.tenant_id AND m.id = r.model_id
+             LEFT JOIN oa_form_version v ON v.tenant_id = a.tenant_id AND v.id = a.form_version_id
+             LEFT JOIN oa_form f ON f.tenant_id = v.tenant_id AND f.id = v.form_id
+            """;
+        args.add(size);
+        args.add(((long) page - 1) * size);
+        var items = jdbcTemplate.query("""
+            SELECT a.id AS application_id, a.title, a.business_key, a.applicant_name, a.applicant_dept_name,
+                   a.submitted_time, m.name AS model_name, f.name AS form_name,
+                   t.ID_ AS task_id, t.NAME_ AS task_name, t.CREATE_TIME_ AS task_time, t.access_user
+            """ + from + joins + where + " ORDER BY t.CREATE_TIME_ DESC, t.ID_ DESC LIMIT ? OFFSET ?", (rs, rowNum) -> {
+                long actor = rs.getLong("access_user");
+                return new OaTodoTaskResp(rs.getLong("application_id"),
+                    rs.getString("title"), rs.getString("business_key"), rs.getString("model_name"),
+                    rs.getString("form_name"), rs.getString("applicant_name"), rs.getString("applicant_dept_name"),
+                    rs.getString("task_id"), rs.getString("task_name"), timestamp(rs, "task_time"),
+                    timestamp(rs, "submitted_time"), actor == userId ? null : actor,
+                    actor == userId ? null : actors.get(actor));
+            }, args.toArray());
+        return new TodoPage(items, total == null ? 0 : total);
+    }
+
+    public record TodoPage(List<OaTodoTaskResp> items, long total) {}
 
     public Map<String, TodoApplication> todoApplications(long tenantId, Collection<String> processInstanceIds) {
         if (processInstanceIds == null || processInstanceIds.isEmpty()) {

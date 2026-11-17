@@ -51,6 +51,8 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class AdminImServiceImpl implements AdminImService {
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.guardfind.backend.property.operations.PropertyOperationsService operations;
 
     private static final String SENDER_ADMIN = "ADMIN";
     private static final String SENDER_USER = "USER";
@@ -158,6 +160,8 @@ public class AdminImServiceImpl implements AdminImService {
         AdminMessageDO msg = new AdminMessageDO();
         msg.setUserId(userId);
         msg.setSenderType(SENDER_ADMIN);
+        if (operations != null)
+            operations.guardReply(userId, StpUtil.getLoginIdAsLong());
         msg.setAdminId(StpUtil.getLoginIdAsLong());
         msg.setAdminName(currentAdminName());
         msg.setContent(trimmed);

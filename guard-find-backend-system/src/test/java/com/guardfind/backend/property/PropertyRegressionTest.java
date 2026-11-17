@@ -210,7 +210,8 @@ class PropertyRegressionTest {
         assertEquals(unit, cap.getValue().getPriceUnit());
         assertEquals(mode, cap.getValue().getRentalMode());
         assertFalse(cap.getValue().isRecommended());
-        assertEquals(unit, com.guardfind.backend.property.support.PropertyRespAssembler.toResp(cap.getValue()).getPriceUnit());
+        assertEquals(unit, com.guardfind.backend.property.support.PropertyRespAssembler.toResp(cap.getValue())
+            .getPriceUnit());
     }
 
     @Test
@@ -259,10 +260,12 @@ class PropertyRegressionTest {
 
     @Test
     void normalRequestCannotSetRecommendedAndStatusEndpointCan() throws Exception {
-        assertFalse(java.util.Arrays.stream(PropertyReq.class.getDeclaredFields()).anyMatch(f -> f.getName().equals("recommended")));
+        assertFalse(java.util.Arrays.stream(PropertyReq.class.getDeclaredFields())
+            .anyMatch(f -> f.getName().equals("recommended")));
         var mapper = new com.fasterxml.jackson.databind.ObjectMapper()
             .disable(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
-        var r = mapper.readValue("{\"title\":\"房源\",\"address\":\"地址\",\"propertyType\":\"house\",\"priceType\":\"rent\",\"price\":10,\"status\":2,\"recommended\":true}", PropertyReq.class);
+        var r = mapper
+            .readValue("{\"title\":\"房源\",\"address\":\"地址\",\"propertyType\":\"house\",\"priceType\":\"rent\",\"price\":10,\"status\":2,\"recommended\":true}", PropertyReq.class);
         service.createForAdmin(null, r);
         var inserted = ArgumentCaptor.forClass(PropertyDO.class);
         verify(properties).insert(inserted.capture());

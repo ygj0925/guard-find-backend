@@ -54,6 +54,8 @@ import java.util.stream.Collectors;
 public class PropertyServiceImpl implements PropertyService {
 
     private final PropertyMapper propertyMapper;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.guardfind.backend.property.operations.PropertyOperationsService operations;
     private final MiniappUserMapper appUserMapper;
     private final PropertyInteractionService interactionService;
     private final PropertyHomeService homeService;
@@ -151,6 +153,8 @@ public class PropertyServiceImpl implements PropertyService {
             .eq("id", id)
             .setSql("view_count = CASE WHEN view_count IS NULL THEN 1 ELSE view_count + 1 END"));
         property.setViewCount((property.getViewCount() == null ? 0 : property.getViewCount()) + 1);
+        if (operations != null && Integer.valueOf(2).equals(property.getStatus()))
+            operations.event(id, viewer, "VIEW");
         PropertyResp resp = toResp(property);
         MiniappUserDO owner = property.getUserId() == null ? null : appUserMapper.selectById(property.getUserId());
         if (owner != null) {
@@ -227,7 +231,8 @@ public class PropertyServiceImpl implements PropertyService {
             throw new BusinessException("房源不存在");
         }
         propertyMapper.update(null, Wrappers.<PropertyDO>lambdaUpdate()
-            .eq(PropertyDO::getId, id).set(PropertyDO::isRecommended, recommended));
+            .eq(PropertyDO::getId, id)
+            .set(PropertyDO::isRecommended, recommended));
     }
 
     @Override
@@ -310,7 +315,8 @@ public class PropertyServiceImpl implements PropertyService {
             throw new BusinessException("价格单位与租售类型或租赁方式不匹配");
         }
         property.setPriceUnit("rent".equals(req.getPriceType())
-            ? ("short".equals(req.getRentalMode()) ? "day" : "month") : null);
+            ? ("short".equals(req.getRentalMode()) ? "day" : "month")
+            : null);
         property.setTitle(StrUtil.trim(req.getTitle()));
         property.setDescription(StrUtil.trimToNull(req.getDescription()));
         property.setPropertyType(req.getPropertyType());
@@ -365,7 +371,8 @@ public class PropertyServiceImpl implements PropertyService {
                 .stream()
                 .collect(Collectors.toMap(MiniappUserDO::getId, Function.identity()));
         Long viewerId = MiniappUserContextHolder.getUserId();
-        var favorites = viewerId == null || page.getRecords().isEmpty() ? java.util.Set.<Long>of()
+        var favorites = viewerId == null || page.getRecords().isEmpty()
+            ? java.util.Set.<Long>of()
             : interactionService.favoritedIds(viewerId, page.getRecords().stream().map(PropertyDO::getId).toList());
         List<PropertyResp> list = page.getRecords().stream().map(property -> {
             PropertyResp resp = toResp(property);

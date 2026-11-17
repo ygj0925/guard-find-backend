@@ -48,8 +48,10 @@ public class MiniappWebConfiguration implements WebMvcConfigurer {
                 String path = request.getServletPath();
                 boolean publicRoute = "POST".equals(request.getMethod()) && path.equals("/miniapp/auth/login") || "GET"
                     .equals(request.getMethod()) && (path.equals("/miniapp/property/list") || path
-                        .equals("/miniapp/property/home") || path.matches("/miniapp/property/[0-9]+") || path
-                            .equals("/miniapp/region/tree"));
+                        .equals("/miniapp/property/home") || path
+                            .equals("/miniapp/property/operations/settings") || path
+                                .matches("/miniapp/property/[0-9]+/operations") || path
+                                    .matches("/miniapp/property/[0-9]+") || path.equals("/miniapp/region/tree"));
                 Long id = StpMiniappUtil.getLoginId(StpMiniappUtil.getTokenValue());
                 if (id != null) {
                     var user = users.selectById(id);

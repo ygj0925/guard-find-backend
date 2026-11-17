@@ -96,8 +96,8 @@ public class PropertyReq implements Serializable {
     @com.fasterxml.jackson.annotation.JsonIgnore
     @Schema(hidden = true)
     public boolean isPriceUnitValid() {
-        return priceUnit == null || "rent".equals(priceType)
-            && ("short".equals(rentalMode) ? "day" : "month").equals(priceUnit);
+        return priceUnit == null || "rent".equals(priceType) && ("short".equals(rentalMode) ? "day" : "month")
+            .equals(priceUnit);
     }
 
     @NotBlank(message = "地址不能为空")

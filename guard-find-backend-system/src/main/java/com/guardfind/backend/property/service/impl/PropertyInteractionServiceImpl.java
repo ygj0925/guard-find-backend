@@ -59,6 +59,11 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class PropertyInteractionServiceImpl implements PropertyInteractionService {
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.guardfind.backend.property.operations.PropertyOperationsService operations;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.guardfind.backend.property.operations.PropertyBookingOperations bookingOperations;
+
     /** 预约状态 */
     private static final int BOOKING_PENDING = 1;
     private static final int BOOKING_CONFIRMED = 2;
@@ -112,7 +117,9 @@ public class PropertyInteractionServiceImpl implements PropertyInteractionServic
             .select(PropertyFavoriteDO::getPropertyId)
             .eq(PropertyFavoriteDO::getUserId, userId)
             .in(PropertyFavoriteDO::getPropertyId, propertyIds))
-            .stream().map(PropertyFavoriteDO::getPropertyId).collect(Collectors.toSet());
+            .stream()
+            .map(PropertyFavoriteDO::getPropertyId)
+            .collect(Collectors.toSet());
     }
 
     @Override
@@ -126,7 +133,8 @@ public class PropertyInteractionServiceImpl implements PropertyInteractionServic
 
     @Override
     public PageResp<PropertyResp> history(Long userId, PageQuery pageQuery) {
-        var result = propertyPage(propertyMapper.historyPage(new Page<>(pageNum(pageQuery), pageSize(pageQuery)), userId));
+        var result = propertyPage(propertyMapper
+            .historyPage(new Page<>(pageNum(pageQuery), pageSize(pageQuery)), userId));
         var ids = favoritedIds(userId, result.getList().stream().map(PropertyResp::getId).toList());
         result.getList().forEach(p -> p.setIsFavorited(ids.contains(p.getId())));
         return result;
@@ -165,6 +173,8 @@ public class PropertyInteractionServiceImpl implements PropertyInteractionServic
         if (Objects.equals(property.getUserId(), userId)) {
             throw new BusinessException("不能预约自己的房源");
         }
+        if (operations != null)
+            operations.assertAvailable(propertyId);
         if (property.getStatus() != 2) {
             throw new BusinessException("该房源当前不可预约");
         }
@@ -174,7 +184,7 @@ public class PropertyInteractionServiceImpl implements PropertyInteractionServic
         if (bookingMapper.selectCount(Wrappers.<PropertyBookingDO>lambdaQuery()
             .eq(PropertyBookingDO::getUserId, userId)
             .eq(PropertyBookingDO::getPropertyId, propertyId)
-            .in(PropertyBookingDO::getStatus, 1, 2)) > 0) {
+            .in(PropertyBookingDO::getStatus, 1, 2, 5)) > 0) {
             throw new BusinessException("已有待确认或已确认的预约，请勿重复提交");
         }
         PropertyBookingDO booking = new PropertyBookingDO();
@@ -188,6 +198,8 @@ public class PropertyInteractionServiceImpl implements PropertyInteractionServic
         booking.setStatus(BOOKING_PENDING);
         booking.setCreateTime(LocalDateTime.now());
         bookingMapper.insert(booking);
+        if (bookingOperations != null)
+            bookingOperations.created(booking.getId());
 
         // 站内信通知房东
         if (property.getUserId() != null) {
@@ -213,6 +225,16 @@ public class PropertyInteractionServiceImpl implements PropertyInteractionServic
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void updateBookingStatus(Long userId, Long bookingId, Integer status) {
+        if (bookingOperations != null) {
+            String action = Integer.valueOf(2).equals(status)
+                ? "CONFIRM"
+                : Integer.valueOf(3).equals(status)
+                    ? "REJECT"
+                    : Integer.valueOf(4).equals(status) ? "CANCEL" : "INVALID";
+            bookingOperations
+                .action(bookingId, userId, false, new com.guardfind.backend.property.operations.PropertyBookingOperations.Action(action, "通过预约列表处理", null));
+            return;
+        }
         PropertyBookingDO booking = bookingMapper.selectById(bookingId);
         if (booking == null) {
             throw new BusinessException("预约不存在");
@@ -272,17 +294,30 @@ public class PropertyInteractionServiceImpl implements PropertyInteractionServic
 
     @Transactional(rollbackFor = Exception.class)
     public void updateBookingStatusForAdmin(Long id, Integer status) {
+        if (bookingOperations != null) {
+            String action = Integer.valueOf(2).equals(status)
+                ? "CONFIRM"
+                : Integer.valueOf(3).equals(status)
+                    ? "REJECT"
+                    : Integer.valueOf(4).equals(status) ? "CANCEL" : "INVALID";
+            bookingOperations.action(id, cn.dev33.satoken.stp.StpUtil
+                .getLoginIdAsLong(), true, new com.guardfind.backend.property.operations.PropertyBookingOperations.Action(action, "后台处理预约", null));
+            return;
+        }
         var booking = bookingMapper.selectById(id);
         if (booking == null)
             throw new BusinessException("预约不存在");
         changeBookingStatus(booking, Integer.valueOf(4).equals(status), status);
+        if (Integer.valueOf(4).equals(status))
+            messageService.send(booking.getUserId(), "PROPERTY_BOOKING", booking
+                .getId(), "看房预约已取消", "管家已取消你的预约，请查看详情或重新预约");
     }
 
     @Override
     public void cleanupForDelete(Long propertyId) {
         if (bookingMapper.selectCount(Wrappers.<PropertyBookingDO>lambdaQuery()
             .eq(PropertyBookingDO::getPropertyId, propertyId)
-            .in(PropertyBookingDO::getStatus, 1, 2)) > 0)
+            .in(PropertyBookingDO::getStatus, 1, 2, 5)) > 0)
             throw new BusinessException("房源仍有待确认或已确认预约，请先处理预约");
         favoriteMapper.delete(Wrappers.<PropertyFavoriteDO>lambdaQuery()
             .eq(PropertyFavoriteDO::getPropertyId, propertyId));

@@ -1,3 +1,19 @@
+/*
+ * Copyright (c) 2022-present Charles7c Authors. All Rights Reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.guardfind.backend.property.service;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
@@ -48,22 +64,38 @@ public class PropertyHomeService {
         var home = getForAdmin();
         var now = LocalDateTime.now();
         var activities = home.getActivities().stream().filter(a -> a.activeAt(now)).toList();
-        Set<Long> referenced = activities.stream().flatMap(a -> a.getPropertyIds().stream()).collect(Collectors.toSet());
-        home.getBanners().stream().filter(b -> b.isEnabled() && "property".equals(b.getTargetType()) && b.isTargetValid())
-            .map(b -> Long.valueOf(b.getTargetId())).forEach(referenced::add);
-        Set<Long> published = referenced.isEmpty() ? Set.of() : propertyMapper.selectList(Wrappers.<PropertyDO>lambdaQuery()
-            .select(PropertyDO::getId).in(PropertyDO::getId, referenced).eq(PropertyDO::getStatus, 2)
-            .eq(PropertyDO::getDeleted, 0L)).stream().map(PropertyDO::getId).collect(Collectors.toSet());
-        activities.forEach(a -> a.setPropertyIds(a.getPropertyIds().stream().filter(published::contains).distinct().toList()));
+        Set<Long> referenced = activities.stream()
+            .flatMap(a -> a.getPropertyIds().stream())
+            .collect(Collectors.toSet());
+        home.getBanners()
+            .stream()
+            .filter(b -> b.isEnabled() && "property".equals(b.getTargetType()) && b.isTargetValid())
+            .map(b -> Long.valueOf(b.getTargetId()))
+            .forEach(referenced::add);
+        Set<Long> published = referenced.isEmpty()
+            ? Set.of()
+            : propertyMapper.selectList(Wrappers.<PropertyDO>lambdaQuery()
+                .select(PropertyDO::getId)
+                .in(PropertyDO::getId, referenced)
+                .eq(PropertyDO::getStatus, 2)
+                .eq(PropertyDO::getDeleted, 0L)).stream().map(PropertyDO::getId).collect(Collectors.toSet());
+        activities.forEach(a -> a.setPropertyIds(a.getPropertyIds()
+            .stream()
+            .filter(published::contains)
+            .distinct()
+            .toList()));
         Set<String> activeIds = activities.stream().map(PropertyHomeResp.Activity::getId).collect(Collectors.toSet());
         home.setActivities(activities);
-        home.setBanners(home.getBanners().stream().filter(b -> b.isEnabled() && b.isTargetValid())
+        home.setBanners(home.getBanners()
+            .stream()
+            .filter(b -> b.isEnabled() && b.isTargetValid())
             .filter(b -> switch (b.getTargetType()) {
                 case "all", "recommended" -> true;
                 case "activity" -> activeIds.contains(b.getTargetId());
                 case "property" -> published.contains(Long.valueOf(b.getTargetId()));
                 default -> false;
-            }).toList());
+            })
+            .toList());
         return home;
     }
 
@@ -72,8 +104,12 @@ public class PropertyHomeService {
             throw new BusinessException("活动 ID 格式不合法");
         }
         var now = LocalDateTime.now();
-        return getForAdmin().getActivities().stream().filter(a -> activityId.equals(a.getId()) && a.activeAt(now))
-            .findFirst().orElseThrow(() -> new BusinessException("活动不存在或已失效")).getPropertyIds();
+        return getForAdmin().getActivities()
+            .stream()
+            .filter(a -> activityId.equals(a.getId()) && a.activeAt(now))
+            .findFirst()
+            .orElseThrow(() -> new BusinessException("活动不存在或已失效"))
+            .getPropertyIds();
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -113,23 +149,38 @@ public class PropertyHomeService {
     }
 
     private void validateReferences(PropertyHomeResp home) {
-        Set<Long> ids = home.getActivities().stream().flatMap(a -> a.getPropertyIds().stream()).collect(Collectors.toSet());
-        home.getBanners().stream().filter(b -> "property".equals(b.getTargetType()))
-            .map(b -> Long.valueOf(b.getTargetId())).forEach(ids::add);
-        Set<Long> existing = ids.isEmpty() ? Set.of() : propertyMapper.selectList(Wrappers.<PropertyDO>lambdaQuery()
-            .select(PropertyDO::getId).in(PropertyDO::getId, ids).eq(PropertyDO::getDeleted, 0L))
-            .stream().map(PropertyDO::getId).collect(Collectors.toSet());
+        Set<Long> ids = home.getActivities()
+            .stream()
+            .flatMap(a -> a.getPropertyIds().stream())
+            .collect(Collectors.toSet());
+        home.getBanners()
+            .stream()
+            .filter(b -> "property".equals(b.getTargetType()))
+            .map(b -> Long.valueOf(b.getTargetId()))
+            .forEach(ids::add);
+        Set<Long> existing = ids.isEmpty()
+            ? Set.of()
+            : propertyMapper.selectList(Wrappers.<PropertyDO>lambdaQuery()
+                .select(PropertyDO::getId)
+                .in(PropertyDO::getId, ids)
+                .eq(PropertyDO::getDeleted, 0L)).stream().map(PropertyDO::getId).collect(Collectors.toSet());
         if (!existing.containsAll(ids)) {
             throw new BusinessException("活动或 Banner 引用的房源不存在");
         }
-        Set<String> activityIds = home.getActivities().stream().map(PropertyHomeResp.Activity::getId).collect(Collectors.toSet());
-        if (home.getBanners().stream().anyMatch(b -> "activity".equals(b.getTargetType()) && !activityIds.contains(b.getTargetId()))) {
+        Set<String> activityIds = home.getActivities()
+            .stream()
+            .map(PropertyHomeResp.Activity::getId)
+            .collect(Collectors.toSet());
+        if (home.getBanners()
+            .stream()
+            .anyMatch(b -> "activity".equals(b.getTargetType()) && !activityIds.contains(b.getTargetId()))) {
             throw new BusinessException("Banner 引用的活动不存在");
         }
     }
 
     private com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<PropertyHomeDO> homeQuery() {
-        return Wrappers.<PropertyHomeDO>lambdaQuery().eq(PropertyHomeDO::getId, 1L)
+        return Wrappers.<PropertyHomeDO>lambdaQuery()
+            .eq(PropertyHomeDO::getId, 1L)
             .eq(PropertyHomeDO::getTenantId, tenant.getDefaultTenantId());
     }
 

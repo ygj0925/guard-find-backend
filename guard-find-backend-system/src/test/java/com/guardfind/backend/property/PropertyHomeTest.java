@@ -1,3 +1,19 @@
+/*
+ * Copyright (c) 2022-present Charles7c Authors. All Rights Reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.guardfind.backend.property;
 
 import cn.dev33.satoken.annotation.SaCheckPermission;
@@ -56,7 +72,8 @@ class PropertyHomeTest {
         properties = mock(PropertyMapper.class);
         json = new ObjectMapper();
         validation = Validation.buildDefaultValidatorFactory();
-        service = new PropertyHomeService(homes, properties, json, validation.getValidator(), new TenantExtensionProperties());
+        service = new PropertyHomeService(homes, properties, json, validation
+            .getValidator(), new TenantExtensionProperties());
     }
 
     @AfterEach
@@ -131,7 +148,8 @@ class PropertyHomeTest {
         service.save(home);
         var saved = ArgumentCaptor.forClass(PropertyHomeDO.class);
         verify(homes, times(2)).update(saved.capture(), any());
-        assertEquals("10:00-17:00", json.readValue(saved.getValue().getContentJson(), PropertyHomeResp.class).getServiceHours());
+        assertEquals("10:00-17:00", json.readValue(saved.getValue().getContentJson(), PropertyHomeResp.class)
+            .getServiceHours());
         verify(homes, never()).insert(any(PropertyHomeDO.class));
     }
 
@@ -150,17 +168,17 @@ class PropertyHomeTest {
         home.setActivities(List.of(active, expired, future, disabled));
         var disabledBanner = banner("disabled", "all", null);
         disabledBanner.setEnabled(false);
-        home.setBanners(List.of(banner("all", "all", null), banner("rec", "recommended", null),
-            banner("active", "activity", "active"), banner("expired", "activity", "expired"),
-            banner("future", "activity", "future"), banner("disabled-act", "activity", "disabled"),
-            banner("published", "property", "10"), banner("draft", "property", "11"),
-            banner("deleted", "property", "12"), disabledBanner));
+        home.setBanners(List
+            .of(banner("all", "all", null), banner("rec", "recommended", null), banner("active", "activity", "active"), banner("expired", "activity", "expired"), banner("future", "activity", "future"), banner("disabled-act", "activity", "disabled"), banner("published", "property", "10"), banner("draft", "property", "11"), banner("deleted", "property", "12"), disabledBanner));
         stored(home);
         when(properties.selectList(any())).thenReturn(List.of(property(10, 2)));
         var result = service.getPublic();
         assertEquals(List.of("active"), result.getActivities().stream().map(PropertyHomeResp.Activity::getId).toList());
         assertEquals(List.of(10L), result.getActivities().getFirst().getPropertyIds());
-        assertEquals(List.of("all", "rec", "active", "published"), result.getBanners().stream().map(PropertyHomeResp.Banner::getId).toList());
+        assertEquals(List.of("all", "rec", "active", "published"), result.getBanners()
+            .stream()
+            .map(PropertyHomeResp.Banner::getId)
+            .toList());
         var query = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
         verify(properties).selectList(query.capture());
         assertTrue(query.getValue().getSqlSegment().contains("status"));
@@ -232,7 +250,9 @@ class PropertyHomeTest {
         assertFalse(validation.getValidator().validate(nullLists).isEmpty());
         assertThrows(BusinessException.class, () -> service.save(nullLists));
         assertThrows(BusinessException.class, () -> service.save(null));
-        for (String url : List.of("javascript:alert(1)", "https://example.com/a b", "https://", "http://?foo", "https://example.com/" + "a".repeat(1000))) {
+        for (String url : List
+            .of("javascript:alert(1)", "https://example.com/a b", "https://", "http://?foo", "https://example.com/" + "a"
+                .repeat(1000))) {
             var imageBanner = banner("image", "all", null);
             imageBanner.setImageUrl(url);
             assertFalse(validation.getValidator().validate(imageBanner).isEmpty());
@@ -266,37 +286,45 @@ class PropertyHomeTest {
 
     @Test
     void bannerTargetsAndValidInputsFollowTheFixedContract() throws Exception {
-        for (var b : List.of(banner("all", "all", null), banner("rec", "recommended", null),
-            banner("event", "activity", "summer-2026"), banner("room", "property", "123"))) {
+        for (var b : List
+            .of(banner("all", "all", null), banner("rec", "recommended", null), banner("event", "activity", "summer-2026"), banner("room", "property", "123"))) {
             b.setImageUrl("https://example.com/image.png");
             assertTrue(validation.getValidator().validate(b).isEmpty());
         }
-        for (var b : List.of(banner("all", "all", "unexpected"), banner("rec", "recommended", "1"),
-            banner("event", "activity", null), banner("room", "property", "0"),
-            banner("room", "property", "1.1"), banner("bad", "other", null))) {
+        for (var b : List
+            .of(banner("all", "all", "unexpected"), banner("rec", "recommended", "1"), banner("event", "activity", null), banner("room", "property", "0"), banner("room", "property", "1.1"), banner("bad", "other", null))) {
             assertFalse(validation.getValidator().validate(b).isEmpty());
         }
-        var a = json.readValue("{\"id\":\"ids\",\"title\":\"活动\",\"propertyIds\":[\"10\",11]}", PropertyHomeResp.Activity.class);
+        var a = json
+            .readValue("{\"id\":\"ids\",\"title\":\"活动\",\"propertyIds\":[\"10\",11]}", PropertyHomeResp.Activity.class);
         assertEquals(List.of(10L, 11L), a.getPropertyIds());
     }
 
     @Test
     void controllerUsesExistingPermissionsAndValidatesPutBeforeService() throws Exception {
         assertEquals("system:property:list", PropertyHomeController.class.getMethod("homeForAdmin")
-            .getAnnotation(SaCheckPermission.class).value()[0]);
+            .getAnnotation(SaCheckPermission.class)
+            .value()[0]);
         assertEquals("system:property:update", PropertyHomeController.class.getMethod("save", PropertyHomeResp.class)
-            .getAnnotation(SaCheckPermission.class).value()[0]);
-        assertEquals("system:property:status", PropertyAdminController.class.getMethod("updateRecommended", Long.class, boolean.class)
-            .getAnnotation(SaCheckPermission.class).value()[0]);
+            .getAnnotation(SaCheckPermission.class)
+            .value()[0]);
+        assertEquals("system:property:status", PropertyAdminController.class
+            .getMethod("updateRecommended", Long.class, boolean.class)
+            .getAnnotation(SaCheckPermission.class)
+            .value()[0]);
         try (var validator = new LocalValidatorFactoryBean()) {
             validator.afterPropertiesSet();
             var target = mock(PropertyHomeService.class);
-            var mvc = MockMvcBuilders.standaloneSetup(new PropertyHomeController(target)).setValidator(validator).build();
+            var mvc = MockMvcBuilders.standaloneSetup(new PropertyHomeController(target))
+                .setValidator(validator)
+                .build();
             mvc.perform(put("/system/property/home").contentType("application/json")
-                .content("{\"supportPhone\":\"bad phone\",\"banners\":[],\"activities\":[]}")).andExpect(status().isBadRequest());
+                .content("{\"supportPhone\":\"bad phone\",\"banners\":[],\"activities\":[]}"))
+                .andExpect(status().isBadRequest());
             verifyNoInteractions(target);
             mvc.perform(put("/system/property/home").contentType("application/json")
-                .content("{\"supportPhone\":null,\"serviceHours\":null,\"banners\":[],\"activities\":[]}")).andExpect(status().isOk());
+                .content("{\"supportPhone\":null,\"serviceHours\":null,\"banners\":[],\"activities\":[]}"))
+                .andExpect(status().isOk());
             verify(target).save(any());
         }
     }
@@ -305,8 +333,9 @@ class PropertyHomeTest {
     void homeWhitelistAllowsAnonymousGetButPostStillRequiresMiniappLogin() throws Exception {
         var users = mock(com.guardfind.backend.miniapp.mapper.MiniappUserMapper.class);
         var registry = mock(org.springframework.web.servlet.config.annotation.InterceptorRegistry.class);
-        when(registry.addInterceptor(any())).thenAnswer(invocation ->
-            new org.springframework.web.servlet.config.annotation.InterceptorRegistration(invocation.getArgument(0)));
+        when(registry.addInterceptor(any()))
+            .thenAnswer(invocation -> new org.springframework.web.servlet.config.annotation.InterceptorRegistration(invocation
+                .getArgument(0)));
         new com.guardfind.backend.miniapp.config.MiniappWebConfiguration(users, new TenantExtensionProperties())
             .addInterceptors(registry);
         var captured = ArgumentCaptor.forClass(org.springframework.web.servlet.HandlerInterceptor.class);
@@ -321,8 +350,8 @@ class PropertyHomeTest {
             assertTrue(interceptor.preHandle(request, response, new Object()));
             assertNull(com.guardfind.backend.miniapp.context.MiniappUserContextHolder.getUserId());
             request.setMethod("POST");
-            var error = assertThrows(com.guardfind.backend.miniapp.exception.MiniappBizException.class,
-                () -> interceptor.preHandle(request, response, new Object()));
+            var error = assertThrows(com.guardfind.backend.miniapp.exception.MiniappBizException.class, () -> interceptor
+                .preHandle(request, response, new Object()));
             assertEquals("401", error.getCode());
             verifyNoInteractions(users);
         } finally {

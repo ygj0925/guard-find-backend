@@ -208,6 +208,30 @@ class OaApprovalServiceTest {
         """;
 
     @Test
+    void todoPaginatesAndSearchesBeyondTwoHundredTasks() {
+        runner().run(context -> {
+            Fixture fixture = fixture(context, BPMN);
+            fixture.submit();
+            String taskId = fixture.approvalService.todo(TENANT, 102, null, 1, 10).items().get(0).taskId();
+            for (int i = 0; i < 205; i++) {
+                fixture.jdbc.update("""
+                    INSERT INTO ACT_RU_TASK (ID_, REV_, NAME_, PROC_INST_ID_, TENANT_ID_, ASSIGNEE_, CREATE_TIME_)
+                    SELECT ?, 1, 'historical task', PROC_INST_ID_, TENANT_ID_, ASSIGNEE_, CREATE_TIME_
+                      FROM ACT_RU_TASK WHERE ID_ = ?
+                    """, "extra-" + i, taskId);
+            }
+            var last = fixture.approvalService.todo(TENANT, 102, null, 21, 10);
+            assertThat(last.total()).isEqualTo(206);
+            assertThat(last.items()).hasSize(6);
+            fixture.jdbc.update("UPDATE oa_application SET title = 'old-search-target' WHERE tenant_id = ?", TENANT);
+            var search = fixture.approvalService.todo(TENANT, 102, "old-search-target", 21, 10);
+            assertThat(search.total()).isEqualTo(206);
+            assertThat(search.items()).hasSize(6);
+            assertThat(fixture.approvalService.todo(202, 102, null, 1, 10).total()).isZero();
+        });
+    }
+
+    @Test
     void todoAndDoneAreScopedToCurrentApprover() {
         runner().run(context -> {
             Fixture fixture = fixture(context, BPMN);

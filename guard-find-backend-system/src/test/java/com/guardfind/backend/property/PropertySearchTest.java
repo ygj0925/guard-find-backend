@@ -313,7 +313,8 @@ class PropertySearchTest {
     void roomShortUnitRecommendationAndActivityFiltersComposeWithPaging() throws Exception {
         try (var statement = connection.createStatement()) {
             statement.executeUpdate("UPDATE gf_property SET price_unit = 'month', recommended = 0");
-            statement.executeUpdate("UPDATE gf_property SET rental_mode = 'short', price_unit = 'day', recommended = 1 WHERE id IN (2, 3, 90, 91, 92)");
+            statement
+                .executeUpdate("UPDATE gf_property SET rental_mode = 'short', price_unit = 'day', recommended = 1 WHERE id IN (2, 3, 90, 91, 92)");
             statement.executeUpdate("UPDATE gf_property SET rental_mode = 'room', recommended = 1 WHERE id = 4");
         }
         var query = new PropertyQuery();
@@ -343,10 +344,11 @@ class PropertySearchTest {
         when(home.requireActivePropertyIds("empty")).thenReturn(List.of());
         query.setActivityId("empty");
         assertEquals(0, service.page(query, null).getTotal());
-        when(home.requireActivePropertyIds("expired")).thenThrow(new top.continew.starter.core.exception.BusinessException("活动失效"));
+        when(home.requireActivePropertyIds("expired"))
+            .thenThrow(new top.continew.starter.core.exception.BusinessException("活动失效"));
         query.setActivityId("expired");
-        org.junit.jupiter.api.Assertions.assertThrows(top.continew.starter.core.exception.BusinessException.class,
-            () -> service.page(query, null));
+        org.junit.jupiter.api.Assertions
+            .assertThrows(top.continew.starter.core.exception.BusinessException.class, () -> service.page(query, null));
     }
 
     @Test
@@ -398,13 +400,16 @@ class PropertySearchTest {
             var target = mock(PropertyService.class);
             var mvc = MockMvcBuilders.standaloneSetup(new PropertyController(target)).setValidator(validator).build();
             var invalid = List.of(Map.of("propertyType", "office"), Map.of("priceType", "lease"), Map
-                .of("rentalMode", "other"), Map.of("priceUnit", "year"), Map.of("activityId", ""), Map.of("activityId", "Bad_ID"),
-                Map.of("activityId", "a".repeat(41)), Map.of("recommended", "maybe"), Map.of("sort", "price"), Map.of("sort", ""), Map.of("sort", " "), Map
-                    .of("sort", "price DESC; DROP TABLE gf_property"), Map.of("keyword", "湾".repeat(65)), Map
-                        .of("minPrice", "-0.01"), Map.of("maxPrice", "-0.01"), Map.of("minPrice", "1.001"), Map
-                            .of("maxPrice", "2.123"), Map.of("minPrice", "10000000000"), Map
-                                .of("maxPrice", "9999999999.999"), Map.of("maxPrice", "10000000000"), Map
-                                    .of("minPrice", "200", "maxPrice", "100"), Map.of("minPrice", "not-a-number"));
+                .of("rentalMode", "other"), Map.of("priceUnit", "year"), Map.of("activityId", ""), Map
+                    .of("activityId", "Bad_ID"), Map.of("activityId", "a".repeat(41)), Map
+                        .of("recommended", "maybe"), Map.of("sort", "price"), Map.of("sort", ""), Map
+                            .of("sort", " "), Map.of("sort", "price DESC; DROP TABLE gf_property"), Map
+                                .of("keyword", "湾".repeat(65)), Map.of("minPrice", "-0.01"), Map
+                                    .of("maxPrice", "-0.01"), Map.of("minPrice", "1.001"), Map
+                                        .of("maxPrice", "2.123"), Map.of("minPrice", "10000000000"), Map
+                                            .of("maxPrice", "9999999999.999"), Map.of("maxPrice", "10000000000"), Map
+                                                .of("minPrice", "200", "maxPrice", "100"), Map
+                                                    .of("minPrice", "not-a-number"));
             for (var params : invalid) {
                 var request = get("/miniapp/property/list");
                 params.forEach((name, value) -> request.param(name, value));

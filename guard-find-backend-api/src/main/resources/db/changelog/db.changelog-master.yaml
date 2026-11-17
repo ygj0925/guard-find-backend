@@ -162,3 +162,6 @@ databaseChangeLog:
   # OA 运维干预审计
   - include:
       file: classpath:db/changelog/mysql/oa/oa_ops_audit.sql
+
+  - include:
+      file: classpath:db/changelog/mysql/property_operations_workflow.sql

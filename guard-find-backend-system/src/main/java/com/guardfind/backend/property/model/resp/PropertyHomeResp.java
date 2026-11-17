@@ -1,3 +1,19 @@
+/*
+ * Copyright (c) 2022-present Charles7c Authors. All Rights Reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.guardfind.backend.property.model.resp;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
@@ -17,8 +33,8 @@ import java.util.List;
 @Data
 @JsonInclude(JsonInclude.Include.ALWAYS)
 public class PropertyHomeResp {
-    private static final DateTimeFormatter DATE_TIME = DateTimeFormatter
-        .ofPattern("uuuu-MM-dd HH:mm:ss").withResolverStyle(ResolverStyle.STRICT);
+    private static final DateTimeFormatter DATE_TIME = DateTimeFormatter.ofPattern("uuuu-MM-dd HH:mm:ss")
+        .withResolverStyle(ResolverStyle.STRICT);
 
     @Size(max = 20)
     @Pattern(regexp = "^\\+?[0-9][0-9-]{4,18}[0-9]$", message = "客服电话格式不合法")
@@ -35,8 +51,13 @@ public class PropertyHomeResp {
     @AssertTrue(message = "Banner 或活动 ID 不能重复")
     @JsonIgnore
     public boolean isIdsUnique() {
-        return (banners == null || unique(banners.stream().filter(java.util.Objects::nonNull).map(Banner::getId).toList()))
-            && (activities == null || unique(activities.stream().filter(java.util.Objects::nonNull).map(Activity::getId).toList()));
+        return (banners == null || unique(banners.stream()
+            .filter(java.util.Objects::nonNull)
+            .map(Banner::getId)
+            .toList())) && (activities == null || unique(activities.stream()
+                .filter(java.util.Objects::nonNull)
+                .map(Activity::getId)
+                .toList()));
     }
 
     private static boolean unique(List<?> ids) {
@@ -137,8 +158,9 @@ public class PropertyHomeResp {
         @JsonIgnore
         public boolean isTimeRangeValid() {
             try {
-                if (startsAt != null && !startsAt.matches("^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}$")
-                    || endsAt != null && !endsAt.matches("^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}$")) {
+                if (startsAt != null && !startsAt
+                    .matches("^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}$") || endsAt != null && !endsAt
+                        .matches("^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}$")) {
                     return false;
                 }
                 var start = parseTime(startsAt);
@@ -150,8 +172,8 @@ public class PropertyHomeResp {
         }
 
         public boolean activeAt(LocalDateTime now) {
-            return enabled && isTimeRangeValid() && (startsAt == null || !parseTime(startsAt).isAfter(now))
-                && (endsAt == null || parseTime(endsAt).isAfter(now));
+            return enabled && isTimeRangeValid() && (startsAt == null || !parseTime(startsAt)
+                .isAfter(now)) && (endsAt == null || parseTime(endsAt).isAfter(now));
         }
     }
 }

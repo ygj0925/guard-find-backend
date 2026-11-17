@@ -56,6 +56,8 @@ import java.util.stream.Collectors;
 public class ImServiceImpl implements ImService {
 
     private final ImConversationMapper conversationMapper;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.guardfind.backend.property.operations.PropertyOperationsService operations;
     private final ImMessageMapper messageMapper;
     private final MiniappUserMapper appUserMapper;
     private final MiniappNoticeService messageService;
@@ -289,6 +291,7 @@ public class ImServiceImpl implements ImService {
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public ImMessageResp sendSupport(String content) {
         Long userId = MiniappUserContextHolder.getUserIdRequired();
         if (StrUtil.isBlank(content)) {
@@ -301,6 +304,8 @@ public class ImServiceImpl implements ImService {
         AdminMessageDO msg = new AdminMessageDO();
         msg.setUserId(userId);
         msg.setSenderType("USER");
+        if (operations != null)
+            operations.incoming(userId);
         msg.setContent(trimmed);
         msg.setIsRead(0);
         msg.setCreateTime(LocalDateTime.now());

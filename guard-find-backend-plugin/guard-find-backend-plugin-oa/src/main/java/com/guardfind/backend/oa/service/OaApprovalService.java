@@ -77,7 +77,6 @@ public class OaApprovalService {
     public static final String COMMAND_REVOKE_CC = "REVOKE_CC";
 
     private static final int DEDUP_TTL_HOURS = 24;
-    private static final int TODO_SCAN_LIMIT = 200;
     private static final int MAX_REASON_LENGTH = 500;
 
     private final OaApprovalRepository approvalRepository;
@@ -114,40 +113,14 @@ public class OaApprovalService {
     }
 
     public ApprovalPage<OaTodoTaskResp> todo(long tenantId, long userId, String keyword, int page, int size) {
-        Map<String, TaskAccess> accesses = new LinkedHashMap<>();
-        for (Task task : engine.todoTasks(Long.toString(tenantId), Long.toString(userId), TODO_SCAN_LIMIT)) {
-            accesses.put(task.getId(), new TaskAccess(task, null, null));
-        }
+        Map<Long, String> actors = new LinkedHashMap<>();
+        actors.put(userId, null);
         for (Delegation delegation : activeDelegations(tenantId, userId)) {
-            for (Task task : engine.todoTasks(Long.toString(tenantId), Long.toString(delegation
-                .delegatorId()), TODO_SCAN_LIMIT)) {
-                accesses.putIfAbsent(task.getId(), new TaskAccess(task, delegation.delegatorId(), delegation
-                    .delegatorName()));
-            }
+            if (delegation.delegatorId() != userId) actors.putIfAbsent(delegation.delegatorId(), delegation.delegatorName());
         }
-        Set<String> instanceIds = new LinkedHashSet<>();
-        for (TaskAccess access : accesses.values()) {
-            if (access.task().getProcessInstanceId() != null) {
-                instanceIds.add(access.task().getProcessInstanceId());
-            }
-        }
-        Map<String, TodoApplication> applications = approvalRepository.todoApplications(tenantId, instanceIds);
-        List<OaTodoTaskResp> items = new ArrayList<>();
-        for (TaskAccess access : accesses.values()) {
-            Task task = access.task();
-            TodoApplication application = applications.get(task.getProcessInstanceId());
-            if (application == null) {
-                continue;
-            }
-            if (!matchesKeyword(keyword, application.title(), application.businessKey())) {
-                continue;
-            }
-            items.add(new OaTodoTaskResp(application.id(), application.title(), application.businessKey(), application
-                .modelName(), application.formName(), application.applicantName(), application.applicantDeptName(), task
-                    .getId(), task.getName(), localTime(task.getCreateTime()), application.submittedTime(), access
-                        .proxyForId(), access.proxyForName()));
-        }
-        return paginate(items, page, size);
+        var result = approvalRepository.todoPage(tenantId, userId, actors, keyword, Math.max(1, page),
+            Math.min(100, Math.max(1, size)));
+        return new ApprovalPage<>(result.items(), result.total());
     }
 
     public ApprovalPage<OaDoneRecordResp> done(long tenantId, long userId, String keyword, int page, int size) {

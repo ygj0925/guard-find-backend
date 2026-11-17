@@ -1,3 +1,19 @@
+/*
+ * Copyright (c) 2022-present Charles7c Authors. All Rights Reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.guardfind.backend.property;
 
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
@@ -34,9 +50,10 @@ class PropertyHomePersistenceTest {
         var source = new JdbcDataSource();
         source.setURL("jdbc:h2:mem:property_home_" + UUID.randomUUID() + ";MODE=MySQL;DATABASE_TO_LOWER=TRUE");
         try (var connection = source.getConnection(); var validation = Validation.buildDefaultValidatorFactory();
-             var tenantContext = mockStatic(TenantContextHolder.class)) {
+            var tenantContext = mockStatic(TenantContextHolder.class)) {
             try (var statement = connection.createStatement()) {
-                statement.execute("CREATE TABLE gf_property_home (id BIGINT PRIMARY KEY CHECK(id = 1), tenant_id BIGINT NOT NULL, content_json VARCHAR(100000) NOT NULL)");
+                statement
+                    .execute("CREATE TABLE gf_property_home (id BIGINT PRIMARY KEY CHECK(id = 1), tenant_id BIGINT NOT NULL, content_json VARCHAR(100000) NOT NULL)");
             }
             var currentTenant = new AtomicLong(0);
             var config = new MybatisConfiguration();
@@ -54,8 +71,8 @@ class PropertyHomePersistenceTest {
             var factory = new MybatisSqlSessionFactoryBuilder().build(config);
             try (var session = factory.openSession(true)) {
                 var mapper = session.getMapper(PropertyHomeMapper.class);
-                var service = new PropertyHomeService(mapper, mock(PropertyMapper.class), new ObjectMapper(),
-                    validation.getValidator(), new TenantExtensionProperties());
+                var service = new PropertyHomeService(mapper, mock(PropertyMapper.class), new ObjectMapper(), validation
+                    .getValidator(), new TenantExtensionProperties());
                 assertTrue(service.getPublic().getActivities().isEmpty());
                 var home = new PropertyHomeResp();
                 home.setSupportPhone("13800000000");
@@ -71,7 +88,8 @@ class PropertyHomePersistenceTest {
                 session.clearCache();
                 assertNull(mapper.selectById(1L));
                 assertEquals(0, mapper.update(null, Wrappers.<PropertyHomeDO>lambdaUpdate()
-                    .eq(PropertyHomeDO::getId, 1L).set(PropertyHomeDO::getContentJson, "{}")));
+                    .eq(PropertyHomeDO::getId, 1L)
+                    .set(PropertyHomeDO::getContentJson, "{}")));
                 currentTenant.set(0);
                 session.clearCache();
                 assertEquals("全天", service.getForAdmin().getServiceHours());
