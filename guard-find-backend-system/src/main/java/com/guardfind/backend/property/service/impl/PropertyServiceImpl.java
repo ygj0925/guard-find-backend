@@ -56,6 +56,8 @@ public class PropertyServiceImpl implements PropertyService {
     private final PropertyMapper propertyMapper;
     @org.springframework.beans.factory.annotation.Autowired
     private com.guardfind.backend.property.operations.PropertyOperationsService operations;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.guardfind.backend.property.lease.PropertyLeaseService leases;
     private final MiniappUserMapper appUserMapper;
     private final PropertyInteractionService interactionService;
     private final PropertyHomeService homeService;
@@ -183,6 +185,8 @@ public class PropertyServiceImpl implements PropertyService {
     public void delete(Long id, Long userId) {
         assertPublisher(userId);
         PropertyDO property = getOwned(id, userId);
+        if (leases != null)
+            leases.guardForPropertyDelete(id);
         interactionService.cleanupForDelete(id);
         propertyMapper.deleteById(property.getId());
     }
@@ -241,6 +245,8 @@ public class PropertyServiceImpl implements PropertyService {
         if (propertyMapper.lockById(id) == null) {
             throw new BusinessException("房源不存在");
         }
+        if (leases != null)
+            leases.guardForPropertyDelete(id);
         interactionService.cleanupForDelete(id);
         propertyMapper.deleteById(id);
     }

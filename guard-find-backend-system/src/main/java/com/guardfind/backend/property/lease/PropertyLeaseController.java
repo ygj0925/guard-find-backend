@@ -1,0 +1,128 @@
+/*
+ * Copyright (c) 2022-present Charles7c Authors. All Rights Reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.guardfind.backend.property.lease;
+
+import cn.dev33.satoken.annotation.SaCheckPermission;
+import cn.dev33.satoken.annotation.SaMode;
+import cn.dev33.satoken.stp.StpUtil;
+import com.guardfind.backend.miniapp.context.MiniappUserContextHolder;
+import com.guardfind.backend.property.operations.PropertyOperationsService;
+import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.*;
+import java.util.Map;
+
+@RestController
+@RequiredArgsConstructor
+public class PropertyLeaseController {
+    private final PropertyLeaseService leases;
+    private final PropertyOperationsService operations;
+
+    @GetMapping("/miniapp/property/leases")
+    public Map<String, Object> mine(@RequestParam(defaultValue = "1") int page,
+                                    @RequestParam(defaultValue = "10") int size,
+                                    @RequestParam(required = false) String status) {
+        return leases.page(MiniappUserContextHolder.getUserIdRequired(), false, status, null, null, page, size);
+    }
+
+    @GetMapping("/miniapp/property/leases/{id}")
+    public Map<String, Object> detail(@PathVariable long id) {
+        return leases.detail(id, MiniappUserContextHolder.getUserIdRequired(), false);
+    }
+
+    @PostMapping("/miniapp/property/leases/{id}/action")
+    public Map<String, Object> action(@PathVariable long id, @RequestBody PropertyLeaseService.Action input) {
+        return leases.action(id, MiniappUserContextHolder.getUserIdRequired(), false, input);
+    }
+
+    @GetMapping("/system/property/leases")
+    @SaCheckPermission("system:property:lease:list")
+    public Map<String, Object> page(@RequestParam(defaultValue = "1") int page,
+                                    @RequestParam(defaultValue = "10") int size,
+                                    @RequestParam(required = false) String status,
+                                    @RequestParam(required = false) String keyword,
+                                    @RequestParam(required = false) Integer expiringDays,
+                                    @RequestParam(required = false) String renewalStatus,
+                                    @RequestParam(required = false) String moveOutStatus) {
+        return leases.page(null, true, status, keyword, expiringDays, renewalStatus, moveOutStatus, page, size);
+    }
+
+    @GetMapping("/system/property/leases/{id}")
+    @SaCheckPermission("system:property:lease:list")
+    public Map<String, Object> adminDetail(@PathVariable long id) {
+        return leases.detail(id, null, true);
+    }
+
+    @PostMapping("/system/property/leases")
+    @SaCheckPermission("system:property:lease:create")
+    public String create(@RequestBody PropertyLeaseService.Draft input) {
+        return leases.create(input, StpUtil.getLoginIdAsLong());
+    }
+
+    @PutMapping("/system/property/leases/{id}")
+    @SaCheckPermission("system:property:lease:update")
+    public void update(@PathVariable long id, @RequestBody PropertyLeaseService.Draft input) {
+        leases.update(id, input, StpUtil.getLoginIdAsLong());
+    }
+
+    @PostMapping("/system/property/leases/{id}/action")
+    public Map<String, Object> adminAction(@PathVariable long id, @RequestBody PropertyLeaseService.Action input) {
+        operations.platform();
+        String permission = switch (input.action() == null ? "" : input.action()) {
+            case "PUBLISH", "RENEW_APPROVE" -> "system:property:lease:publish";
+            case "VOID", "TERMINATE" -> "system:property:lease:terminate";
+            default -> "system:property:lease:update";
+        };
+        StpUtil.checkPermission(permission);
+        return leases.action(id, StpUtil.getLoginIdAsLong(), true, input);
+    }
+
+    @GetMapping("/system/property/leases/reminders")
+    @SaCheckPermission("system:property:lease:list")
+    public Map<String, Object> reminders(@RequestParam(defaultValue = "1") int page,
+                                         @RequestParam(defaultValue = "10") int size) {
+        return leases.reminders(page, size);
+    }
+
+    @GetMapping("/system/property/leases/settings")
+    @SaCheckPermission("system:property:lease:list")
+    public PropertyLeaseService.Settings settings() {
+        operations.platform();
+        return leases.settings();
+    }
+
+    @PutMapping("/system/property/leases/settings")
+    @SaCheckPermission("system:property:lease:update")
+    public void settings(@RequestBody PropertyLeaseService.Settings input) {
+        leases.saveSettings(input);
+    }
+
+    @GetMapping("/system/property/leases/property-options")
+    @SaCheckPermission(value = {"system:property:lease:create", "system:property:lease:update"}, mode = SaMode.OR)
+    public Map<String, Object> properties(@RequestParam(defaultValue = "") String keyword,
+                                          @RequestParam(defaultValue = "1") int page,
+                                          @RequestParam(defaultValue = "20") int size) {
+        return leases.propertyOptions(keyword, page, size);
+    }
+
+    @GetMapping("/system/property/leases/customer-options")
+    @SaCheckPermission(value = {"system:property:lease:create", "system:property:lease:update"}, mode = SaMode.OR)
+    public Map<String, Object> customers(@RequestParam(defaultValue = "") String keyword,
+                                         @RequestParam(defaultValue = "1") int page,
+                                         @RequestParam(defaultValue = "20") int size) {
+        return leases.customerOptions(keyword, page, size);
+    }
+}

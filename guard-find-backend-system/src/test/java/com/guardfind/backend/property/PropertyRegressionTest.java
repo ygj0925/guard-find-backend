@@ -456,6 +456,18 @@ class PropertyRegressionTest {
     }
 
     @Test
+    void deletionFromBothEntrypointsPreservesPropertiesWithLiveContracts() {
+        var leases = mock(com.guardfind.backend.property.lease.PropertyLeaseService.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "leases", leases);
+        when(properties.lockById(10L)).thenReturn(property(2));
+        doThrow(new IllegalStateException("lease still active")).when(leases).guardForPropertyDelete(10L);
+        assertThrows(IllegalStateException.class, () -> service.delete(10L, 2L));
+        assertThrows(IllegalStateException.class, () -> service.deleteForAdmin(10L));
+        verify(properties, never()).deleteById(anyLong());
+        verifyNoInteractions(interactions);
+    }
+
+    @Test
     void favoritesUseJoinedCountAndEnrichOwner() {
         var p = new Page<PropertyDO>();
         p.setRecords(List.of(property(2)));

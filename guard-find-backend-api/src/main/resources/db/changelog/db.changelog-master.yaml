@@ -165,3 +165,5 @@ databaseChangeLog:
 
   - include:
       file: classpath:db/changelog/mysql/property_operations_workflow.sql
+  - include:
+      file: classpath:db/changelog/mysql/property_lease_workflow.sql
