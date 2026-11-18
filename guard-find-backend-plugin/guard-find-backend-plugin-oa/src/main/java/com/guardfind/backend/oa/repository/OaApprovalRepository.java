@@ -120,10 +120,13 @@ public class OaApprovalRepository {
         StringBuilder access = new StringBuilder("CASE");
         for (Long actor : actors.keySet()) {
             String id = Long.toString(actor);
-            access.append(" WHEN t.ASSIGNEE_ = '").append(id)
+            access.append(" WHEN t.ASSIGNEE_ = '")
+                .append(id)
                 .append("' OR (t.ASSIGNEE_ IS NULL AND EXISTS (SELECT 1 FROM ACT_RU_IDENTITYLINK l")
                 .append(" WHERE l.TASK_ID_ = t.ID_ AND l.TYPE_ = 'candidate' AND l.USER_ID_ = '")
-                .append(id).append("')) THEN ").append(id);
+                .append(id)
+                .append("')) THEN ")
+                .append(id);
         }
         access.append(" ELSE NULL END");
         String from = """
@@ -144,20 +147,20 @@ public class OaApprovalRepository {
              LEFT JOIN oa_form f ON f.tenant_id = v.tenant_id AND f.id = v.form_id
             """;
         args.add(size);
-        args.add(((long) page - 1) * size);
+        args.add(((long)page - 1) * size);
         var items = jdbcTemplate.query("""
             SELECT a.id AS application_id, a.title, a.business_key, a.applicant_name, a.applicant_dept_name,
                    a.submitted_time, m.name AS model_name, f.name AS form_name,
                    t.ID_ AS task_id, t.NAME_ AS task_name, t.CREATE_TIME_ AS task_time, t.access_user
             """ + from + joins + where + " ORDER BY t.CREATE_TIME_ DESC, t.ID_ DESC LIMIT ? OFFSET ?", (rs, rowNum) -> {
-                long actor = rs.getLong("access_user");
-                return new OaTodoTaskResp(rs.getLong("application_id"),
-                    rs.getString("title"), rs.getString("business_key"), rs.getString("model_name"),
-                    rs.getString("form_name"), rs.getString("applicant_name"), rs.getString("applicant_dept_name"),
-                    rs.getString("task_id"), rs.getString("task_name"), timestamp(rs, "task_time"),
-                    timestamp(rs, "submitted_time"), actor == userId ? null : actor,
-                    actor == userId ? null : actors.get(actor));
-            }, args.toArray());
+            long actor = rs.getLong("access_user");
+            return new OaTodoTaskResp(rs.getLong("application_id"), rs.getString("title"), rs
+                .getString("business_key"), rs.getString("model_name"), rs.getString("form_name"), rs
+                    .getString("applicant_name"), rs.getString("applicant_dept_name"), rs.getString("task_id"), rs
+                        .getString("task_name"), timestamp(rs, "task_time"), timestamp(rs, "submitted_time"), actor == userId
+                            ? null
+                            : actor, actor == userId ? null : actors.get(actor));
+        }, args.toArray());
         return new TodoPage(items, total == null ? 0 : total);
     }
 

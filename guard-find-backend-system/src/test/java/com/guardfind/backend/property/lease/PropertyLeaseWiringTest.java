@@ -39,19 +39,19 @@ class PropertyLeaseWiringTest {
     void adminControllerStartsWithTheManagedIdentityService() {
         try (var context = new AnnotationConfigApplicationContext()) {
             var beans = context.getBeanFactory();
-            for (Class<?> dependency : new Class<?>[]{PropertyMapper.class, MiniappUserMapper.class,
+            for (Class<?> dependency : new Class<?>[] {PropertyMapper.class, MiniappUserMapper.class,
                 PropertyInteractionServiceImpl.class, PropertyHomeService.class, OperationsStore.class,
                 PropertyOperationsService.class, MiniappNoticeService.class, PlatformTransactionManager.class}) {
                 beans.registerSingleton(dependency.getSimpleName(), mock(dependency));
             }
             beans.registerSingleton("objectMapper", new ObjectMapper());
-            context.register(PropertyAdminController.class, PropertyServiceImpl.class, RegionRepository.class,
-                PropertyLeaseService.class, PropertySigningProfileService.class, PropertyIdentityVerificationService.class,
-                UnavailableIdentityVerificationProvider.class);
+            context
+                .register(PropertyAdminController.class, PropertyServiceImpl.class, RegionRepository.class, PropertyLeaseService.class, PropertySigningProfileService.class, PropertyIdentityVerificationService.class, UnavailableIdentityVerificationProvider.class);
             context.refresh();
 
             assertThat(context.getBean(PropertyAdminController.class)).isNotNull();
-            assertThat(beans.getDependenciesForBean("propertyLeaseService")).contains("propertyIdentityVerificationService");
+            assertThat(beans.getDependenciesForBean("propertyLeaseService"))
+                .contains("propertyIdentityVerificationService");
         }
     }
 }

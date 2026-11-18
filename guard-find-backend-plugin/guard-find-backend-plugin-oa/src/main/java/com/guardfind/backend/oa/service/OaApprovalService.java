@@ -30,7 +30,6 @@ import com.guardfind.backend.oa.model.OaTodoTaskResp;
 import com.guardfind.backend.oa.repository.OaApprovalRepository;
 import com.guardfind.backend.oa.repository.OaApprovalRepository.ApprovalApplication;
 import com.guardfind.backend.oa.repository.OaApprovalRepository.ApplicationBrief;
-import com.guardfind.backend.oa.repository.OaApprovalRepository.TodoApplication;
 import com.guardfind.backend.oa.repository.OaCcRepository;
 import com.guardfind.backend.oa.repository.OaDelegateRepository;
 import com.guardfind.backend.oa.repository.OaDelegateRepository.Delegation;
@@ -116,10 +115,11 @@ public class OaApprovalService {
         Map<Long, String> actors = new LinkedHashMap<>();
         actors.put(userId, null);
         for (Delegation delegation : activeDelegations(tenantId, userId)) {
-            if (delegation.delegatorId() != userId) actors.putIfAbsent(delegation.delegatorId(), delegation.delegatorName());
+            if (delegation.delegatorId() != userId)
+                actors.putIfAbsent(delegation.delegatorId(), delegation.delegatorName());
         }
-        var result = approvalRepository.todoPage(tenantId, userId, actors, keyword, Math.max(1, page),
-            Math.min(100, Math.max(1, size)));
+        var result = approvalRepository.todoPage(tenantId, userId, actors, keyword, Math.max(1, page), Math
+            .min(100, Math.max(1, size)));
         return new ApprovalPage<>(result.items(), result.total());
     }
 
