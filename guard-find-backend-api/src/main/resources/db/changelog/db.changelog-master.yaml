@@ -177,3 +177,5 @@ databaseChangeLog:
       file: classpath:db/changelog/mysql/property_publishing.sql
   - include:
       file: classpath:db/changelog/mysql/property_location_search.sql
+  - include:
+      file: classpath:db/changelog/mysql/property_identity_verification.sql

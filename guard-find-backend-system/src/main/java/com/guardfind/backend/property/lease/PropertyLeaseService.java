@@ -22,7 +22,6 @@ import com.guardfind.backend.property.operations.OperationsStore;
 import com.guardfind.backend.property.operations.PropertyOperationsService;
 import com.guardfind.backend.miniapp.service.MiniappNoticeService;
 import lombok.Data;
-import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import top.continew.starter.core.exception.BusinessException;
@@ -35,7 +34,6 @@ import java.util.*;
 import static com.guardfind.backend.property.operations.OperationsStore.*;
 
 @Service
-@RequiredArgsConstructor
 @lombok.extern.slf4j.Slf4j
 public class PropertyLeaseService {
     private final OperationsStore db;
@@ -44,6 +42,32 @@ public class PropertyLeaseService {
     private final ObjectMapper json;
     private final org.springframework.transaction.PlatformTransactionManager transactions;
     private final PropertySigningProfileService signingProfiles;
+    private final PropertyIdentityVerificationService identity;
+
+    public PropertyLeaseService(OperationsStore db,
+                                PropertyOperationsService operations,
+                                MiniappNoticeService notices,
+                                ObjectMapper json,
+                                org.springframework.transaction.PlatformTransactionManager transactions,
+                                PropertySigningProfileService signingProfiles,
+                                PropertyIdentityVerificationService identity) {
+        this.db = db;
+        this.operations = operations;
+        this.notices = notices;
+        this.json = json;
+        this.transactions = transactions;
+        this.signingProfiles = signingProfiles;
+        this.identity = identity;
+    }
+
+    public PropertyLeaseService(OperationsStore db,
+                                PropertyOperationsService operations,
+                                MiniappNoticeService notices,
+                                ObjectMapper json,
+                                org.springframework.transaction.PlatformTransactionManager transactions,
+                                PropertySigningProfileService signingProfiles) {
+        this(db, operations, notices, json, transactions, signingProfiles, new PropertyIdentityVerificationService(db));
+    }
 
     public static final String SIGNING_CONSENT = "我已阅读并确认本合同全部内容，以本人姓名手写签署；确认所选印章为本人有权使用，同意将本次签名及印章与当前合同一并保存。";
 
@@ -54,7 +78,24 @@ public class PropertyLeaseService {
     public record Action(String action, long version, String reason, String signedName, Boolean accepted,
                          String contentHash, String requestedEndDate, String renewalStartDate, String renewalEndDate,
                          BigDecimal monthlyRent, BigDecimal deposit, LeaseHandwriting handwriting,
-                         Boolean saveSignature, Long sealId) {
+                         Boolean saveSignature, Long sealId, Long verificationId) {
+        public Action(String action,
+                      long version,
+                      String reason,
+                      String signedName,
+                      Boolean accepted,
+                      String contentHash,
+                      String requestedEndDate,
+                      String renewalStartDate,
+                      String renewalEndDate,
+                      BigDecimal monthlyRent,
+                      BigDecimal deposit,
+                      LeaseHandwriting handwriting,
+                      Boolean saveSignature,
+                      Long sealId) {
+            this(action, version, reason, signedName, accepted, contentHash, requestedEndDate, renewalStartDate, renewalEndDate, monthlyRent, deposit, handwriting, saveSignature, sealId, null);
+        }
+
         public Action(String action,
                       long version,
                       String reason,
@@ -66,7 +107,7 @@ public class PropertyLeaseService {
                       String renewalEndDate,
                       BigDecimal monthlyRent,
                       BigDecimal deposit) {
-            this(action, version, reason, signedName, accepted, contentHash, requestedEndDate, renewalStartDate, renewalEndDate, monthlyRent, deposit, null, false, null);
+            this(action, version, reason, signedName, accepted, contentHash, requestedEndDate, renewalStartDate, renewalEndDate, monthlyRent, deposit, null, false, null, null);
         }
     }
 
@@ -587,6 +628,7 @@ public class PropertyLeaseService {
                         throw fail("合同还有未解决的审阅意见，请先在合同详情确认处理结果");
                     if (signatureExpired(row))
                         throw fail("签署期限已过，请联系管理员重新发起合同");
+                    identity.requireVerified(actor, input.verificationId());
                     if (date(text(row, "endDate")).isBefore(LocalDate.now()))
                         throw fail("合同租期已经结束，请联系管理员");
                     String prefix = actorType.equals("TENANT") ? "tenant" : "landlord";

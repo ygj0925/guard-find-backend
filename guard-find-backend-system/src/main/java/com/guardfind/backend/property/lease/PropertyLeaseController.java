@@ -32,6 +32,76 @@ public class PropertyLeaseController {
     private final PropertyOperationsService operations;
     private final PropertySigningProfileService profiles;
     private final PropertyLeasePdfService pdf;
+    private final PropertyIdentityVerificationService identity;
+
+    @GetMapping("/miniapp/identity-verification/status")
+    public Map<String, Object> identityStatus() {
+        return identity.status(MiniappUserContextHolder.getUserIdRequired());
+    }
+
+    @PostMapping("/miniapp/identity-verification/consent")
+    public Map<String, Object> identityConsent(@RequestBody PropertyIdentityVerificationService.ConsentInput input) {
+        return identity.consent(MiniappUserContextHolder.getUserIdRequired(), input);
+    }
+
+    @PostMapping("/miniapp/identity-verification/session")
+    public Map<String, Object> identitySession(@RequestBody PropertyIdentityVerificationService.SessionInput input) {
+        return identity.start(MiniappUserContextHolder.getUserIdRequired(), input);
+    }
+
+    @GetMapping("/miniapp/identity-verification/session/{id}")
+    public Map<String, Object> identitySession(@PathVariable long id) {
+        return identity.session(MiniappUserContextHolder.getUserIdRequired(), id);
+    }
+
+    @GetMapping("/system/property/identity-verification/config")
+    @SaCheckPermission("system:property:identity:list")
+    public PropertyIdentityVerificationService.Config identityConfig() {
+        return identity.config();
+    }
+
+    @PutMapping("/system/property/identity-verification/config")
+    @SaCheckPermission("system:property:identity:update")
+    public void identityConfig(@RequestBody PropertyIdentityVerificationService.Config input) {
+        identity.saveConfig(input);
+    }
+
+    @GetMapping("/system/identity-verification/settings")
+    @SaCheckPermission("system:property:identity:list")
+    public Map<String, Object> identitySettings() {
+        return identity.settingsView();
+    }
+
+    @PutMapping("/system/identity-verification/settings")
+    @SaCheckPermission("system:property:identity:update")
+    public void identitySettings(@RequestBody PropertyIdentityVerificationService.SettingsInput input) {
+        identity.saveSettings(input);
+    }
+
+    @GetMapping("/system/identity-verification/status")
+    @SaCheckPermission("system:property:identity:list")
+    public Map<String, Object> identityStatus(@RequestParam(required = false) String status,
+                                              @RequestParam(defaultValue = "1") int page,
+                                              @RequestParam(defaultValue = "20") int size) {
+        return identity.page(status, page, size);
+    }
+
+    @PostMapping("/system/identity-verification/{id}/manual-review")
+    @SaCheckPermission("system:property:identity:update")
+    public void identityManualReview(@PathVariable long id, @RequestBody Map<String, Object> input) {
+        String decision = input.get("decision") == null ? null : input.get("decision").toString();
+        String reason = input.get("reason") == null ? null : input.get("reason").toString();
+        Long version = input.get("version") == null ? null : Long.valueOf(input.get("version").toString());
+        identity.adminAction(id, StpUtil
+            .getLoginIdAsLong(), new PropertyIdentityVerificationService.AdminAction(decision, reason, version));
+    }
+
+    @PostMapping("/system/property/identity-verification/{id}/action")
+    @SaCheckPermission("system:property:identity:update")
+    public Map<String, Object> identityAction(@PathVariable long id,
+                                              @RequestBody PropertyIdentityVerificationService.AdminAction input) {
+        return identity.adminAction(id, StpUtil.getLoginIdAsLong(), input);
+    }
 
     @GetMapping("/miniapp/property/signing-profile")
     public Map<String, Object> signingProfile() {
