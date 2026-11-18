@@ -86,6 +86,23 @@ public class PropertyReq implements Serializable {
 
     @Length(max = 100)
     private String community;
+    private Double publicLatitude;
+    private Double publicLongitude;
+    @Length(max = 200)
+    private String locationLabel;
+    @Pattern(regexp = "^[1-8][0-9]{5}$", message = "行政区划代码格式不正确")
+    private String regionCode;
+
+    @AssertTrue(message = "请完整填写有效的公开位置经纬度及位置名称")
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    public boolean isLocationValid() {
+        if (publicLatitude == null && publicLongitude == null)
+            return true;
+        return publicLatitude != null && publicLongitude != null && Double.isFinite(publicLatitude) && Double
+            .isFinite(publicLongitude) && Math.abs(publicLatitude) <= 90 && Math
+                .abs(publicLongitude) <= 180 && locationLabel != null && !locationLabel.isBlank();
+    }
+
     private java.time.LocalDate availableFrom;
     @Pattern(regexp = "^(whole|shared|room|short)$", message = "租赁方式取值不合法")
     private String rentalMode;

@@ -30,6 +30,34 @@ import java.util.Map;
 public class PropertyLeaseController {
     private final PropertyLeaseService leases;
     private final PropertyOperationsService operations;
+    private final PropertySigningProfileService profiles;
+    private final PropertyLeasePdfService pdf;
+
+    @GetMapping("/miniapp/property/signing-profile")
+    public Map<String, Object> signingProfile() {
+        return profiles.profile(MiniappUserContextHolder.getUserIdRequired());
+    }
+
+    @PostMapping("/miniapp/property/signing-profile/seal")
+    public Map<String, Object> uploadSeal(@RequestParam org.springframework.web.multipart.MultipartFile file) {
+        return profiles.uploadSeal(MiniappUserContextHolder.getUserIdRequired(), file);
+    }
+
+    @DeleteMapping("/miniapp/property/signing-profile/{kind}")
+    public void deleteSigningAsset(@PathVariable String kind) {
+        profiles.remove(MiniappUserContextHolder.getUserIdRequired(), kind);
+    }
+
+    @GetMapping("/miniapp/property/leases/{id}/pdf")
+    public Map<String, Object> download(@PathVariable long id) {
+        return pdf.download(id, MiniappUserContextHolder.getUserIdRequired(), false);
+    }
+
+    @GetMapping("/system/property/leases/{id}/pdf")
+    @SaCheckPermission("system:property:lease:list")
+    public Map<String, Object> adminDownload(@PathVariable long id) {
+        return pdf.download(id, null, true);
+    }
 
     @GetMapping("/miniapp/property/leases")
     public Map<String, Object> mine(@RequestParam(defaultValue = "1") int page,
@@ -46,6 +74,17 @@ public class PropertyLeaseController {
     @PostMapping("/miniapp/property/leases/{id}/action")
     public Map<String, Object> action(@PathVariable long id, @RequestBody PropertyLeaseService.Action input) {
         return leases.action(id, MiniappUserContextHolder.getUserIdRequired(), false, input);
+    }
+
+    @PostMapping("/miniapp/property/leases/{id}/reviews")
+    public void review(@PathVariable long id, @RequestBody PropertyLeaseService.ReviewInput input) {
+        leases.review(id, MiniappUserContextHolder.getUserIdRequired(), false, input);
+    }
+
+    @PostMapping("/system/property/leases/{id}/reviews")
+    @SaCheckPermission("system:property:lease:update")
+    public void adminReview(@PathVariable long id, @RequestBody PropertyLeaseService.ReviewInput input) {
+        leases.review(id, StpUtil.getLoginIdAsLong(), true, input);
     }
 
     @GetMapping("/system/property/leases")
@@ -82,7 +121,7 @@ public class PropertyLeaseController {
     public Map<String, Object> adminAction(@PathVariable long id, @RequestBody PropertyLeaseService.Action input) {
         operations.platform();
         String permission = switch (input.action() == null ? "" : input.action()) {
-            case "PUBLISH", "RENEW_APPROVE" -> "system:property:lease:publish";
+            case "PUBLISH", "RENEW_APPROVE", "RECALL", "REMIND_SIGN" -> "system:property:lease:publish";
             case "VOID", "TERMINATE" -> "system:property:lease:terminate";
             default -> "system:property:lease:update";
         };

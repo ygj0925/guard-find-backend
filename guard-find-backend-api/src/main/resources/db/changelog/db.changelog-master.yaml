@@ -167,3 +167,13 @@ databaseChangeLog:
       file: classpath:db/changelog/mysql/property_operations_workflow.sql
   - include:
       file: classpath:db/changelog/mysql/property_lease_workflow.sql
+  - include:
+      file: classpath:db/changelog/mysql/property_lease_lifecycle.sql
+  - include:
+      file: classpath:db/changelog/mysql/property_lease_handwriting.sql
+  - include:
+      file: classpath:db/changelog/mysql/property_lease_review.sql
+  - include:
+      file: classpath:db/changelog/mysql/property_publishing.sql
+  - include:
+      file: classpath:db/changelog/mysql/property_location_search.sql

@@ -1,0 +1,14 @@
+{
+  "publisher": "中华人民共和国民政部",
+  "version": "2024-12-31",
+  "sourceUrl": "https://www.mca.gov.cn/mzsj/xzqh/2025/202401xzqh.html",
+  "latestSourceUrl": "https://dmfw.mca.gov.cn/XzqhVersionPublish.html",
+  "sourceSha256": "d4669f6c81091287127147720bad0f3c3465e9e2a2dcc7e887893cc787a23431",
+  "dataSha256": "31c200812e8bf004582096cd56b4988dd9e8c90a4b9bf0ad126dd35d84e36d13",
+  "normalization": {
+    "removedFootnoteCount": 32,
+    "rule": "仅移除原表注2说明的省直辖县级区划名称末尾脚注*；代码与行政名称正文不变"
+  },
+  "entryCount": 3213,
+  "scope": "县级及以上；台湾省、香港特别行政区和澳门特别行政区暂缺地市和区县信息"
+}

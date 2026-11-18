@@ -67,6 +67,14 @@ public class PropertyDO extends BaseDO {
     private boolean recommended;
     private String address;
     @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private Double publicLatitude;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private Double publicLongitude;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private String locationLabel;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private String regionCode;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String district;
     @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String city;

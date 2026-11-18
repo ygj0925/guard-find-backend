@@ -36,10 +36,12 @@ import static org.mockito.Mockito.*;
 
 class PropertyLeaseTest {
     JdbcTemplate jdbc;
+    OperationsStore store;
     PropertyLeaseService service;
     MiniappNoticeService notices;
     PropertyOperationsService operations;
     DataSourceTransactionManager tx;
+    PropertySigningProfileService profiles;
 
     @BeforeAll
     static void utilities() {
@@ -66,11 +68,31 @@ class PropertyLeaseTest {
         for (var stmt : sql.split(";"))
             if (!stmt.isBlank())
                 jdbc.execute(stmt);
+        var lifecycleSql = Files.readString(Path
+            .of("../guard-find-backend-api/src/main/resources/db/changelog/mysql/property_lease_lifecycle.sql"));
+        for (var stmt : lifecycleSql.split(";"))
+            if (!stmt.isBlank())
+                jdbc.execute(stmt);
+        for (var stmt : Files.readString(Path
+            .of("../guard-find-backend-api/src/main/resources/db/changelog/mysql/property_lease_handwriting.sql"))
+            .split(";"))
+            if (!stmt.isBlank())
+                jdbc.execute(stmt);
         jdbc.update("INSERT INTO gf_miniapp_user(id,nickname) VALUES(1,'tenant'),(2,'landlord'),(3,'other')");
+        for (var stmt : Files.readString(Path
+            .of("../guard-find-backend-api/src/main/resources/db/changelog/mysql/property_lease_review.sql"))
+            .split(";"))
+            if (!stmt.isBlank())
+                jdbc.execute(stmt);
         jdbc.update("INSERT INTO gf_property(id,user_id,title,address,price_type) VALUES(100,2,'apartment','address','rent')");
         notices = mock(MiniappNoticeService.class);
         operations = mock(PropertyOperationsService.class);
-        var target = new PropertyLeaseService(new OperationsStore(jdbc), operations, notices, new ObjectMapper(), tx);
+        var storeProxy = new ProxyFactory(new OperationsStore(jdbc));
+        storeProxy.setProxyTargetClass(true);
+        storeProxy.addAdvice((org.aopalliance.intercept.MethodInterceptor)invocation -> invocation.proceed());
+        store = (OperationsStore)storeProxy.getProxy();
+        profiles = new PropertySigningProfileService(store, new ObjectMapper());
+        var target = new PropertyLeaseService(store, operations, notices, new ObjectMapper(), tx, profiles);
         var proxy = new ProxyFactory(target);
         proxy.setProxyTargetClass(true);
         proxy.addAdvice(new TransactionInterceptor(tx, new AnnotationTransactionAttributeSource()));
@@ -110,7 +132,190 @@ class PropertyLeaseTest {
     PropertyLeaseService.Action sign(long id, long user) {
         return new PropertyLeaseService.Action("SIGN", version(id), null, user == 1
             ? "租客"
-            : "房东", true, (String)detail(id).get("contentHash"), null, null, null, null, null);
+            : "房东", true, (String)detail(id)
+                .get("contentHash"), null, null, null, null, null, handwriting(), false, null);
+    }
+
+    LeaseHandwriting handwriting() {
+        return new LeaseHandwriting(List.of(List
+            .of(new LeaseHandwriting.Point(80d, 80d), new LeaseHandwriting.Point(250d, 80d), new LeaseHandwriting.Point(120d, 140d), new LeaseHandwriting.Point(250d, 280d), new LeaseHandwriting.Point(310d, 130d), new LeaseHandwriting.Point(420d, 270d), new LeaseHandwriting.Point(460d, 100d), new LeaseHandwriting.Point(600d, 240d))));
+    }
+
+    @Test
+    void reviewBlocksSigningUntilTheAuthorConfirmsAndKeepsBothPartiesInformed() {
+        long lease = create();
+        publish(lease);
+        long round = ((Number)detail(lease).get("publishedVersion")).longValue();
+        String hash = (String)detail(lease).get("contentHash");
+        var question = new PropertyLeaseService.ReviewInput("CREATE", round, hash, null, null, "第三条押金退还", "请说明退款日期");
+        service.review(lease, 1, false, question);
+        service.review(lease, 1, false, question);
+        assertThat(service.page(null, true, "REVIEW_PENDING", null, null, 1, 10).get("total")).isEqualTo(1L);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM gf_property_lease_review", Long.class)).isEqualTo(1);
+        assertThatThrownBy(() -> service.action(lease, 2, false, sign(lease, 2))).hasMessageContaining("审阅意见");
+        long review = jdbc.queryForObject("SELECT id FROM gf_property_lease_review", Long.class);
+        service
+            .review(lease, 9, true, new PropertyLeaseService.ReviewInput("REPLY", round, hash, review, 1L, null, "按合同约定交接后7天退款"));
+        assertThatThrownBy(() -> service.action(lease, 1, false, sign(lease, 1))).hasMessageContaining("审阅意见");
+        var confirm = new PropertyLeaseService.ReviewInput("CONFIRM", round, hash, review, 2L, null, null);
+        assertThatThrownBy(() -> service.review(lease, 9, true, confirm)).hasMessageContaining("提出人");
+        assertThatThrownBy(() -> service.review(lease, 2, false, confirm)).hasMessageContaining("提出人");
+        service
+            .review(lease, 1, false, new PropertyLeaseService.ReviewInput("REOPEN", round, hash, review, 2L, null, "退款渠道仍需说明"));
+        service
+            .review(lease, 9, true, new PropertyLeaseService.ReviewInput("REPLY", round, hash, review, 3L, null, "原付款渠道退款"));
+        service
+            .review(lease, 1, false, new PropertyLeaseService.ReviewInput("CONFIRM", round, hash, review, 4L, null, null));
+        assertThat(detail(lease).get("unresolvedReviews")).isEqualTo(0L);
+        assertThat(service.page(null, true, "REVIEW_PENDING", null, null, 1, 10).get("total")).isEqualTo(0L);
+        service.action(lease, 1, false, sign(lease, 1));
+        service.action(lease, 2, false, sign(lease, 2));
+        assertThat(detail(lease).get("status")).isEqualTo("SIGNED");
+        assertThat(jdbc
+            .queryForObject("SELECT COUNT(*) FROM gf_property_lease_log WHERE action LIKE 'REVIEW_%'", Long.class))
+            .isEqualTo(5);
+    }
+
+    @Test
+    void reviewsRejectOtherAccountsAndOldRoundsAndDoNotCarryOverToNewPublication() {
+        long lease = create();
+        publish(lease);
+        long round = ((Number)detail(lease).get("publishedVersion")).longValue();
+        String hash = (String)detail(lease).get("contentHash");
+        var question = new PropertyLeaseService.ReviewInput("CREATE", round, hash, null, null, "房源信息", "请确认地址");
+        assertThatThrownBy(() -> service.review(lease, 3, false, question)).isInstanceOf(RuntimeException.class);
+        service.review(lease, 1, false, question);
+        service.action(lease, 9, true, action("RECALL", version(lease), "核对地址后重新发送"));
+        publish(lease);
+        assertThatThrownBy(() -> service.review(lease, 1, false, question)).hasMessageContaining("重新审阅");
+        assertThat(detail(lease).get("unresolvedReviews")).isEqualTo(0L);
+        assertThat((List<?>)detail(lease).get("reviews")).hasSize(1);
+        service.action(lease, 1, false, sign(lease, 1));
+    }
+
+    @Test
+    void handwritingIsRequiredAndTheSavedSignatureIsPrivateAndBoundToTheContract() throws Exception {
+        long lease = create();
+        publish(lease);
+        var valid = sign(lease, 1);
+        var textOnly = new PropertyLeaseService.Action("SIGN", valid.version(), null, "租客", true, valid
+            .contentHash(), null, null, null, null, null);
+        assertThatThrownBy(() -> service.action(lease, 1, false, textOnly)).hasMessageContaining("手写");
+        var blank = new PropertyLeaseService.Action("SIGN", valid.version(), null, "租客", true, valid
+            .contentHash(), null, null, null, null, null, new LeaseHandwriting(List.of()), false, null);
+        assertThatThrownBy(() -> service.action(lease, 1, false, blank)).hasMessageContaining("手写");
+        var saved = new PropertyLeaseService.Action("SIGN", valid.version(), null, "租客", true, valid
+            .contentHash(), null, null, null, null, null, handwriting(), true, null);
+        service.action(lease, 1, false, saved);
+        assertThat(profiles.profile(1)).containsKey("handwriting");
+        assertThat(profiles.profile(2)).isEmpty();
+        var records = store
+            .rows("SELECT signer_role,content_hash,signature_hash,contract_snapshot FROM gf_property_lease_signature WHERE lease_id=?", lease);
+        assertThat(records).hasSize(1);
+        assertThat(records.getFirst().get("contentHash")).isEqualTo(valid.contentHash());
+        assertThat(records.getFirst().get("signatureHash").toString()).hasSize(64);
+        assertThat(records.getFirst().get("contractSnapshot").toString()).contains("双方约定的租赁条款全文");
+        assertThatThrownBy(() -> service.action(lease, 9, true, action("RECALL", version(lease), "改正文")))
+            .hasMessageContaining("已有一方");
+        assertThatThrownBy(() -> service.action(lease, 1, false, action("DECLINE", version(lease), "拒绝")))
+            .hasMessageContaining("已签署");
+        profiles.remove(1, "HANDWRITING");
+        assertThat(profiles.profile(1)).isEmpty();
+        assertThat((List<?>)detail(lease).get("signatures")).hasSize(1);
+    }
+
+    @Test
+    void recallRequiresUnsignedPartiesAndRemindersAreThrottledAndOnlyNotifyUnsignedParty() {
+        long lease = create();
+        publish(lease);
+        service.action(lease, 9, true, action("RECALL", version(lease), "双方信息需核对"));
+        assertThat(detail(lease).get("status")).isEqualTo("DRAFT");
+        assertThatThrownBy(() -> service.detail(lease, 1L, false)).hasMessageContaining("无权");
+        publish(lease);
+        service.action(lease, 1, false, sign(lease, 1));
+        reset(notices);
+        service.action(lease, 9, true, action("REMIND_SIGN", version(lease), null));
+        verify(notices).send(eq(2L), eq("PROPERTY_LEASE"), eq(lease), eq("租赁合同待签提醒"), anyString());
+        verifyNoMoreInteractions(notices);
+        assertThatThrownBy(() -> service.action(lease, 9, true, action("REMIND_SIGN", version(lease), null)))
+            .hasMessageContaining("10分钟");
+    }
+
+    @Test
+    void personalSealCannotBeUsedByAnotherUserAndSignedPdfContainsImmutableImages() throws Exception {
+        var image = new java.awt.image.BufferedImage(100, 100, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+        var graphics = image.createGraphics();
+        graphics.setColor(java.awt.Color.RED);
+        graphics.drawOval(5, 5, 90, 90);
+        graphics.dispose();
+        var output = new java.io.ByteArrayOutputStream();
+        javax.imageio.ImageIO.write(image, "png", output);
+        profiles
+            .uploadSeal(1, new org.springframework.mock.web.MockMultipartFile("file", "seal.png", "image/png", output
+                .toByteArray()));
+        @SuppressWarnings("unchecked") var seal = (Map<String, Object>)profiles.profile(1).get("seal");
+        long sealId = Long.parseLong(seal.get("id").toString());
+        long lease = create();
+        publish(lease);
+        var wrong = new PropertyLeaseService.Action("SIGN", version(lease), null, "房东", true, detail(lease)
+            .get("contentHash")
+            .toString(), null, null, null, null, null, handwriting(), false, sealId);
+        assertThatThrownBy(() -> service.action(lease, 2, false, wrong)).hasMessageContaining("本人");
+        var right = new PropertyLeaseService.Action("SIGN", version(lease), null, "租客", true, detail(lease)
+            .get("contentHash")
+            .toString(), null, null, null, null, null, handwriting(), false, sealId);
+        service.action(lease, 1, false, right);
+        service.action(lease, 2, false, sign(lease, 2));
+        profiles.remove(1, "SEAL");
+        var pdf = new PropertyLeasePdfService(service);
+        assertThatThrownBy(() -> pdf.download(lease, 3L, false)).hasMessageContaining("无权");
+        byte[] bytes = Base64.getDecoder().decode(pdf.download(lease, 1L, false).get("base64").toString());
+        try (var document = org.apache.pdfbox.Loader.loadPDF(bytes)) {
+            var text = new org.apache.pdfbox.text.PDFTextStripper().getText(document);
+            assertThat(text).contains("双方约定的租赁条款全文", "双方已签署", "签署记录校验值");
+            assertThat(document.getNumberOfPages()).isGreaterThanOrEqualTo(2);
+        }
+        Files.createDirectories(Path.of("target/signing-preview"));
+        Files.write(Path.of("target/signing-preview/contract.pdf"), bytes);
+        jdbc.update("UPDATE gf_property_lease_signature SET image_data=? WHERE lease_id=? AND signer_role='TENANT'", new byte[] {
+            0}, lease);
+        assertThatThrownBy(() -> pdf.download(lease, 1L, false)).hasMessageContaining("签署记录校验失败");
+    }
+
+    @Test
+    void longDraftPdfKeepsCompleteTermsAndClearlyLabelsItsUnsignedState() throws Exception {
+        long lease = create();
+        var record = detail(lease);
+        String paragraph = "这是用于排版验证的合同条款。租赁双方应逐项核对房屋、租金、押金、交接事项和约定内容。";
+        record.put("terms", (paragraph + "\n").repeat(70) + "条款末尾确认项\n特殊字符保留：\uD83E\uDD84");
+        byte[] bytes = new PropertyLeasePdfService(service).render(record);
+        try (var document = org.apache.pdfbox.Loader.loadPDF(bytes)) {
+            String extracted = new org.apache.pdfbox.text.PDFTextStripper().getText(document);
+            assertThat(document.getNumberOfPages()).isGreaterThan(3);
+            assertThat(extracted).contains("条款末尾确认项", "尚未发送签署", "尚未签署", "[U+1F984]");
+        }
+        Files.createDirectories(Path.of("target/signing-preview"));
+        Files.write(Path.of("target/signing-preview/long-contract.pdf"), bytes);
+    }
+
+    @Test
+    void bothPartiesCanSignTheSamePublicationButOldPublicationRequestsCannotBeReplayed() {
+        long lease = create();
+        publish(lease);
+        var tenant = sign(lease, 1);
+        var landlord = sign(lease, 2);
+        service.action(lease, 1, false, tenant);
+        service.action(lease, 2, false, landlord);
+        assertThat(detail(lease).get("status")).isEqualTo("SIGNED");
+        service.action(lease, 9, true, action("TERMINATE", version(lease), "测试结束"));
+        long next = create();
+        publish(next);
+        var previousRound = sign(next, 1);
+        service.action(next, 9, true, action("RECALL", version(next), "重新核对"));
+        publish(next);
+        assertThatThrownBy(() -> service.action(next, 1, false, previousRound)).hasMessageContaining("重新发送");
+        service.action(next, 1, false, sign(next, 1));
+        assertThat(detail(next).get("tenantSignedAt")).isNotNull();
     }
 
     void signed(long id) {
@@ -132,6 +337,7 @@ class PropertyLeaseTest {
         var first = detail(id).get("tenantSignedAt");
         service.action(id, 2, false, sign(id, 2));
         assertThat(detail(id).get("status")).isEqualTo("SIGNED");
+        verify(operations).occupyForLease(100);
         assertThat(detail(id).get("tenantSignedAt")).isEqualTo(first);
         assertThat(detail(id).get("contentHash").toString()).hasSize(64);
         assertThatThrownBy(() -> service.update(id, draft(LocalDate.now(), LocalDate.now().plusDays(40)), 9))
@@ -250,6 +456,8 @@ class PropertyLeaseTest {
     void expiryAndMoveoutRemainAuditableAndReminderSettingsValidate() {
         long id = create();
         signed(id);
+        // Simulate an imported legacy lease whose term has ended (no handwriting snapshot).
+        jdbc.update("DELETE FROM gf_property_lease_signature WHERE lease_id=?", id);
         jdbc.update("UPDATE gf_property_lease SET end_date=? WHERE id=?", LocalDate.now().minusDays(1), id);
         assertThat(service.detail(id, 1L, false).get("status")).isEqualTo("EXPIRED");
         assertThat(service.detail(id, 1L, false).get("canRenew")).isEqualTo(false);
@@ -323,5 +531,49 @@ class PropertyLeaseTest {
         assertThat(detail(id).get("contentHash")).isNull();
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM gf_property_lease_log WHERE action='PUBLISH'", Long.class))
             .isZero();
+    }
+
+    @Test
+    void terminatedSignedRenewalReleasesOriginalForAnotherApplicationAndMoveOut() {
+        long original = create();
+        signed(original);
+        service
+            .action(original, 1, false, new PropertyLeaseService.Action("RENEW_REQUEST", version(original), "renew", null, null, null, LocalDate
+                .now()
+                .plusDays(395)
+                .toString(), null, null, null, null));
+        var approval = new PropertyLeaseService.Action("RENEW_APPROVE", version(original), null, null, null, null, null, LocalDate
+            .now()
+            .plusDays(31)
+            .toString(), LocalDate.now().plusDays(395).toString(), null, null);
+        long renewal = Long.parseLong(service.action(original, 9, true, approval).get("renewalLeaseId").toString());
+        signed(renewal);
+        service.action(renewal, 9, true, action("TERMINATE", version(renewal), "cancel future renewal"));
+        assertThat(service.detail(original, 1L, false).get("canRenew")).isEqualTo(true);
+        assertThat(detail(original).get("renewalStatus")).isEqualTo("CANCELED");
+        assertThat(detail(renewal).get("previousLeaseId")).isEqualTo(Long.toString(original));
+        service.action(original, 1, false, action("MOVE_OUT_REQUEST", version(original), "move out"));
+        service.action(original, 1, false, action("MOVE_OUT_CANCEL", version(original), "stay"));
+        assertThat(detail(original).get("moveOutStatus")).isEqualTo("NONE");
+    }
+
+    @Test
+    void signingExpiryIsEnforcedBeforeSchedulerAndStillRunsWithRemindersDisabled() {
+        long lease = create();
+        publish(lease);
+        jdbc.update("UPDATE gf_property_lease SET signature_deadline=? WHERE id=?", LocalDateTime.now()
+            .minusMinutes(1), lease);
+        assertThat(detail(lease).get("status")).isEqualTo("SIGNING_EXPIRED");
+        assertThat(service.page(1L, false, "PENDING_SIGNATURE", null, null, 1, 10).get("total")).isEqualTo(0L);
+        assertThat(service.page(1L, false, "SIGNING_EXPIRED", null, null, 1, 10).get("total")).isEqualTo(1L);
+        assertThatThrownBy(() -> service.action(lease, 1, false, sign(lease, 1))).hasMessageContaining("签署期限");
+        long replacement = create();
+        publish(replacement);
+        var settings = service.settings();
+        settings.setRemindersEnabled(false);
+        service.saveSettings(settings);
+        service.maintain();
+        assertThat(jdbc.queryForObject("SELECT status FROM gf_property_lease WHERE id=?", String.class, lease))
+            .isEqualTo("SIGNING_EXPIRED");
     }
 }

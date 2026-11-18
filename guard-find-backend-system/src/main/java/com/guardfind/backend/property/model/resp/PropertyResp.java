@@ -57,6 +57,10 @@ public class PropertyResp implements Serializable {
     private String priceUnit;
     private boolean recommended;
     private String address;
+    private Double publicLatitude;
+    private Double publicLongitude;
+    private String locationLabel;
+    private String regionCode;
     private String district;
     private String city;
     private List<String> facilities;

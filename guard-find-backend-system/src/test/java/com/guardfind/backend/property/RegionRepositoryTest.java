@@ -69,4 +69,14 @@ class RegionRepositoryTest {
         assertEquals(null, repository.nameOf(" "));
         assertEquals(null, repository.nameOf("999999"));
     }
+
+    @Test
+    void officialSourceAndMunicipalityResolution() {
+        assertEquals("中华人民共和国民政部", repository.source().get("publisher"));
+        assertEquals("2024-12-31", repository.source().get("version"));
+        assertEquals("北京市", repository.location("110101").get("city"));
+        assertEquals("东城区", repository.location("110101").get("district"));
+        assertEquals("石家庄市", repository.location("130102").get("city"));
+        assertEquals("仙桃市", repository.location("429004").get("city"));
+    }
 }

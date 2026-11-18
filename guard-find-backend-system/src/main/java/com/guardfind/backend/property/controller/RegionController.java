@@ -42,9 +42,14 @@ public class RegionController {
 
     private final RegionRepository regionRepository;
 
-    @Operation(summary = "省市区树", description = "省 → 市 → 区县三级,国标编码,数据缺失时为空列表")
+    @Operation(summary = "行政区划树", description = "民政部县级以上官方快照，直辖市直接下挂区县；版本和来源见 source 接口")
     @GetMapping("/tree")
     public List<RegionNodeResp> tree() {
         return regionRepository.tree();
+    }
+
+    @GetMapping("/source")
+    public java.util.Map<String, Object> source() {
+        return regionRepository.source();
     }
 }

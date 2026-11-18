@@ -61,6 +61,8 @@ public class PropertyServiceImpl implements PropertyService {
     private final MiniappUserMapper appUserMapper;
     private final PropertyInteractionService interactionService;
     private final PropertyHomeService homeService;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.guardfind.backend.property.support.RegionRepository regions;
 
     @Override
     public Long create(Long userId, PropertyReq req) {
@@ -317,6 +319,17 @@ public class PropertyServiceImpl implements PropertyService {
     }
 
     private void applyReq(PropertyDO property, PropertyReq req) {
+        if (!req.isLocationValid())
+            throw new BusinessException("请完整填写有效的公开位置经纬度及位置名称");
+        property.setPublicLatitude(req.getPublicLatitude());
+        property.setPublicLongitude(req.getPublicLongitude());
+        property.setLocationLabel(StrUtil.trimToNull(req.getLocationLabel()));
+        property.setRegionCode(req.getRegionCode());
+        if (req.getRegionCode() != null) {
+            var location = regions.location(req.getRegionCode());
+            req.setCity(location.get("city"));
+            req.setDistrict(location.get("district"));
+        }
         if (!req.isPriceUnitValid()) {
             throw new BusinessException("价格单位与租售类型或租赁方式不匹配");
         }

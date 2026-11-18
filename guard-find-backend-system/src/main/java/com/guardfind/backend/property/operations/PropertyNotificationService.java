@@ -51,11 +51,11 @@ public class PropertyNotificationService {
             throw new BusinessException("订阅提醒尚未启用或模板已变更");
         db.one("SELECT id FROM gf_property_booking WHERE id=? AND (user_id=? OR owner_id=? OR EXISTS(SELECT 1 FROM gf_property_operation o WHERE o.property_id=gf_property_booking.property_id AND o.manager_id=?))", bookingId, user, user, user);
         db.one("SELECT id FROM gf_miniapp_user WHERE id=? AND deleted=0 FOR UPDATE", user);
-        int changed = db.jdbc
+        int changed = db.jdbc()
             .update("UPDATE gf_property_subscription SET credits=1,update_time=? WHERE user_id=? AND template_id=?", LocalDateTime
                 .now(), user, templateId);
         if (changed == 0)
-            db.jdbc
+            db.jdbc()
                 .update("INSERT INTO gf_property_subscription(user_id,template_id,credits,update_time) VALUES(?,?,1,?)", user, templateId, LocalDateTime
                     .now());
     }
@@ -64,7 +64,7 @@ public class PropertyNotificationService {
         var config = operations.settings();
         String state = config.isSubscriptionEnabled() ? "PENDING" : "DISABLED";
         try {
-            db.jdbc
+            db.jdbc()
                 .update("INSERT INTO gf_property_notification(id,booking_id,user_id,event_key,template_id,payload,state,create_time,update_time) VALUES(?,?,?,?,?,?,?,?,?)", IdUtil
                     .getSnowflakeNextId(), booking, user, event, config.getTemplateId(), title, state, LocalDateTime
                         .now(), LocalDateTime.now());
@@ -80,7 +80,7 @@ public class PropertyNotificationService {
 
     public void dispatch() {
         // A network timeout is ambiguous: record UNKNOWN rather than retrying and consuming another consent.
-        db.jdbc
+        db.jdbc()
             .update("UPDATE gf_property_notification SET state='UNKNOWN',result='发送进程中断，请人工核对微信结果',update_time=? WHERE state='SENDING' AND update_time<?", LocalDateTime
                 .now(), LocalDateTime.now().minusMinutes(5));
         for (var candidate : db
@@ -93,13 +93,14 @@ public class PropertyNotificationService {
                 String skip = null;
                 if (!config.isSubscriptionEnabled() || !Objects.equals(config.getTemplateId(), text(row, "templateId")))
                     skip = "DISABLED";
-                else if (db.jdbc
+                else if (db.jdbc()
                     .update("UPDATE gf_property_subscription SET credits=credits-1,update_time=? WHERE user_id=? AND template_id=? AND credits>0", LocalDateTime
                         .now(), id(row, "userId"), text(row, "templateId")) != 1)
                     skip = "NO_CONSENT";
-                db.jdbc.update("UPDATE gf_property_notification SET state=?,update_time=? WHERE id=?", skip == null
-                    ? "SENDING"
-                    : skip, LocalDateTime.now(), id(row, "id"));
+                db.jdbc()
+                    .update("UPDATE gf_property_notification SET state=?,update_time=? WHERE id=?", skip == null
+                        ? "SENDING"
+                        : skip, LocalDateTime.now(), id(row, "id"));
                 return skip == null ? row : null;
             });
             if (claimed == null)
@@ -147,7 +148,7 @@ public class PropertyNotificationService {
                 state = "UNKNOWN";
                 result = "发送结果未确认，请人工核对；不自动重发";
             }
-            db.jdbc
+            db.jdbc()
                 .update("UPDATE gf_property_notification SET state=?,result=?,update_time=? WHERE id=? AND state='SENDING'", state, truncate(result, 500), LocalDateTime
                     .now(), id(claimed, "id"));
         }

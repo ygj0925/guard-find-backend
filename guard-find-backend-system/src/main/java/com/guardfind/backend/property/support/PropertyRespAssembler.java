@@ -51,6 +51,10 @@ public final class PropertyRespAssembler {
         resp.setPriceUnit(property.getPriceUnit());
         resp.setRecommended(property.isRecommended());
         resp.setAddress(property.getAddress());
+        resp.setPublicLatitude(property.getPublicLatitude());
+        resp.setPublicLongitude(property.getPublicLongitude());
+        resp.setLocationLabel(property.getLocationLabel());
+        resp.setRegionCode(property.getRegionCode());
         resp.setDistrict(property.getDistrict());
         resp.setCity(property.getCity());
         resp.setFacilities(StrUtil.isBlank(property.getFacilities())

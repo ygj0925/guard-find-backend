@@ -46,7 +46,7 @@ public class PropertyBookingOperations {
     private boolean manager(Map<String, Object> b, long user) {
         if (Objects.equals(b.get("ownerId"), Long.toString(user)))
             return true;
-        return db.jdbc
+        return db.jdbc()
             .queryForObject("SELECT COUNT(*) FROM gf_property_operation o JOIN gf_miniapp_user u ON u.id=o.manager_id WHERE o.property_id=? AND o.manager_id=? AND u.deleted=0 AND u.account_status=1 AND u.is_property_manager=1", Long.class, id(b, "propertyId"), user) > 0;
     }
 
@@ -186,9 +186,9 @@ public class PropertyBookingOperations {
             if (!next.isAfter(LocalDateTime.now()))
                 throw new BusinessException("改期时间必须晚于当前时间");
             operations.assertAvailable(id(b, "propertyId"));
-            db.jdbc.update("UPDATE gf_property_booking SET booking_time=? WHERE id=?", next, bookingId);
+            db.jdbc().update("UPDATE gf_property_booking SET booking_time=? WHERE id=?", next, bookingId);
         }
-        int changed = db.jdbc
+        int changed = db.jdbc()
             .update("UPDATE gf_property_booking SET status=?,update_time=? WHERE id=? AND status=?", to, LocalDateTime
                 .now(), bookingId, from);
         if (changed != 1)
@@ -200,7 +200,7 @@ public class PropertyBookingOperations {
             ? title
             : title + "：" + input.reason(), log);
         if (to == 5 || to == 6)
-            db.jdbc
+            db.jdbc()
                 .update("INSERT INTO gf_property_ops_event(id,property_id,user_id,event_type,create_time) VALUES(?,?,?,?,?)", IdUtil
                     .getSnowflakeNextId(), id(b, "propertyId"), id(b, "userId"), to == 5
                         ? "VISIT"
@@ -209,7 +209,7 @@ public class PropertyBookingOperations {
 
     public long log(long booking, String actor, Long user, String action, Integer from, Integer to, String reason) {
         long id = IdUtil.getSnowflakeNextId();
-        db.jdbc
+        db.jdbc()
             .update("INSERT INTO gf_property_booking_log(id,booking_id,actor_type,actor_id,action,from_status,to_status,reason,create_time) VALUES(?,?,?,?,?,?,?,?,?)", id, booking, actor, user, action, from, to, reason, LocalDateTime
                 .now());
         return id;
@@ -222,7 +222,7 @@ public class PropertyBookingOperations {
         if (meta.get("managerId") != null && !Objects.equals(meta.get("managerId"), b.get("ownerId")))
             notices.send(Long.valueOf(meta.get("managerId")
                 .toString()), "PROPERTY_BOOKING", id, "收到待处理看房预约", "有新的看房预约，请及时处理");
-        db.jdbc
+        db.jdbc()
             .update("INSERT INTO gf_property_ops_event(id,property_id,user_id,event_type,create_time) VALUES(?,?,?,?,?)", IdUtil
                 .getSnowflakeNextId(), id(b, "propertyId"), id(b, "userId"), "BOOKING", LocalDateTime.now());
     }
@@ -256,8 +256,9 @@ public class PropertyBookingOperations {
             if (!Set.of(1, 2).contains(status) || parseTime(text(b, "bookingTime")).isAfter(LocalDateTime.now()
                 .minusHours(c.getExpiryHours())))
                 continue;
-            db.jdbc.update("UPDATE gf_property_booking SET status=8,update_time=? WHERE id=?", LocalDateTime
-                .now(), id(b, "id"));
+            db.jdbc()
+                .update("UPDATE gf_property_booking SET status=8,update_time=? WHERE id=?", LocalDateTime
+                    .now(), id(b, "id"));
             long log = log(id(b, "id"), "SYSTEM", null, "EXPIRE", status, 8, "超过预约时间且未完成处理，系统自动关闭");
             notifyParticipants(b, "看房预约已过期", "可重新提交新的看房预约", log);
             count++;
@@ -272,7 +273,7 @@ public class PropertyBookingOperations {
             var time = parseTime(text(b, "bookingTime"));
             if (!time.isAfter(LocalDateTime.now()) || time.isAfter(LocalDateTime.now().plusHours(c.getReminderHours())))
                 continue;
-            if (db.jdbc
+            if (db.jdbc()
                 .queryForObject("SELECT COUNT(*) FROM gf_property_booking_log WHERE booking_id=? AND action='REMIND' AND create_time>=?", Long.class, id(b, "id"), parseTime(b
                     .get("updateTime") == null ? text(b, "createTime") : text(b, "updateTime"))) > 0)
                 continue;

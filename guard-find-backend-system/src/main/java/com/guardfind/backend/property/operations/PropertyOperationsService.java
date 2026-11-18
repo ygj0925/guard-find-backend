@@ -48,7 +48,7 @@ public class PropertyOperationsService {
 
     public OperationsSettings settings() {
         try {
-            return json.readValue(db.jdbc
+            return json.readValue(db.jdbc()
                 .queryForObject("SELECT content_json FROM gf_property_ops_config WHERE id=1", String.class), OperationsSettings.class);
         } catch (Exception e) {
             throw new BusinessException("运营配置读取失败，请联系管理员");
@@ -101,7 +101,7 @@ public class PropertyOperationsService {
         }
         db.one("SELECT id FROM gf_property_ops_config WHERE id=1 FOR UPDATE");
         try {
-            db.jdbc.update("UPDATE gf_property_ops_config SET content_json=? WHERE id=1", json.writeValueAsString(c));
+            db.jdbc().update("UPDATE gf_property_ops_config SET content_json=? WHERE id=1", json.writeValueAsString(c));
         } catch (Exception e) {
             throw new BusinessException("配置保存失败");
         }
@@ -116,7 +116,7 @@ public class PropertyOperationsService {
         if (!c.isPoliciesPublished() || !Objects.equals(c.getPolicyVersion(), version))
             throw new BusinessException("协议版本已变更，请重新阅读");
         try {
-            db.jdbc
+            db.jdbc()
                 .update("INSERT INTO gf_property_policy_accept(user_id,policy_version,create_time) VALUES(?,?,?)", user, version, LocalDateTime
                     .now());
         } catch (org.springframework.dao.DuplicateKeyException ignored) {
@@ -136,7 +136,7 @@ public class PropertyOperationsService {
             empty.put("availability", "ACTIVE");
             empty.put("version", 0);
             if (admin)
-                empty.put("activeBookings", db.jdbc
+                empty.put("activeBookings", db.jdbc()
                     .queryForObject("SELECT COUNT(*) FROM gf_property_booking WHERE property_id=? AND status IN(1,2,5)", Long.class, id));
             return empty;
         }
@@ -144,7 +144,7 @@ public class PropertyOperationsService {
         if (!admin && result.get("managerName") == null)
             result.put("managerId", null);
         if (admin)
-            result.put("activeBookings", db.jdbc
+            result.put("activeBookings", db.jdbc()
                 .queryForObject("SELECT COUNT(*) FROM gf_property_booking WHERE property_id=? AND status IN(1,2,5)", Long.class, id));
         return result;
     }
@@ -189,12 +189,23 @@ public class PropertyOperationsService {
         long version = Long.parseLong(previous.get("version").toString());
         if (version != input.version())
             throw new BusinessException("房源运营信息已更新，请刷新");
-        if (db.jdbc
+        if ("ACTIVE".equals(input.availability())) {
+            if (!db
+                .rows("SELECT id FROM gf_property_lease WHERE property_id=? AND status='SIGNED' AND end_date>=?", id, LocalDate
+                    .now())
+                .isEmpty())
+                throw new BusinessException("房源存在有效或已签订的未来租约，请先处理合同再开放接待");
+            if ("RENTED".equals(previous.get("availability")) && !db
+                .rows("SELECT id FROM gf_property_lease WHERE property_id=? AND status IN('SIGNED','TERMINATED')", id)
+                .isEmpty())
+                throw new BusinessException("请完成退租交接与押金结算，从合同详情确认重新开放房源");
+        }
+        if (db.jdbc()
             .queryForObject("SELECT COUNT(*) FROM gf_property_operation WHERE property_id=?", Long.class, id) == 0)
-            db.jdbc
+            db.jdbc()
                 .update("INSERT INTO gf_property_operation(property_id,availability,version,update_time) VALUES(?,'ACTIVE',0,?)", id, LocalDateTime
                     .now());
-        int changed = db.jdbc
+        int changed = db.jdbc()
             .update("UPDATE gf_property_operation SET manager_id=?,availability=?,reason=?,reopen_date=?,latitude=?,longitude=?,meeting_point=?,instructions=?,version=version+1,update_time=? WHERE property_id=? AND version=?", input
                 .managerId(), input.availability(), input.reason(), reopen, input.latitude(), input.longitude(), input
                     .meetingPoint(), input.instructions(), LocalDateTime.now(), id, version);
@@ -206,7 +217,23 @@ public class PropertyOperationsService {
         return text == null ? 0 : text.length();
     }
 
+    /** Called while holding the property row lock in the signing transaction. */
+    public void occupyForLease(long propertyId) {
+        if (db.rows("SELECT property_id FROM gf_property_operation WHERE property_id=?", propertyId).isEmpty())
+            db.jdbc()
+                .update("INSERT INTO gf_property_operation(property_id,availability,version,update_time) VALUES(?,'ACTIVE',0,?)", propertyId, LocalDateTime
+                    .now());
+        db.jdbc()
+            .update("UPDATE gf_property_operation SET availability='RENTED',reason='租赁合同已签订，请完成交接与结算后由管理员确认重新开放',reopen_date=NULL,version=version+1,update_time=? WHERE property_id=? AND availability='ACTIVE'", LocalDateTime
+                .now(), propertyId);
+    }
+
     public void assertAvailable(long id) {
+        if (!db
+            .rows("SELECT id FROM gf_property_lease WHERE property_id=? AND status='SIGNED' AND end_date>=?", id, LocalDate
+                .now())
+            .isEmpty())
+            throw new BusinessException("该房源已有已签租约，暂不接受新预约");
         var rows = db.rows("SELECT availability FROM gf_property_operation WHERE property_id=?", id);
         if (!rows.isEmpty() && !"ACTIVE".equals(rows.get(0).get("availability")))
             throw new BusinessException("该房源暂不接受新的预约，请查看房源接待说明");
@@ -217,11 +244,11 @@ public class PropertyOperationsService {
             throw new BusinessException("行为类型无效");
         db.one("SELECT id FROM gf_property WHERE id=? AND status=2 AND deleted=0", propertyId);
         // Coalesce repeat views/consult clicks within a minute to limit accidental inflation.
-        if (db.jdbc
+        if (db.jdbc()
             .queryForObject("SELECT COUNT(*) FROM gf_property_ops_event WHERE property_id=? AND event_type=? AND ((user_id=?) OR (user_id IS NULL AND ? IS NULL)) AND create_time>?", Long.class, propertyId, type, user, user, LocalDateTime
                 .now()
                 .minusMinutes(1)) == 0)
-            db.jdbc
+            db.jdbc()
                 .update("INSERT INTO gf_property_ops_event(id,property_id,user_id,event_type,create_time) VALUES(?,?,?,?,?)", IdUtil
                     .getSnowflakeNextId(), propertyId, user, type, LocalDateTime.now());
     }
@@ -244,7 +271,7 @@ public class PropertyOperationsService {
         platform();
         if (status != 1 && status != 2)
             throw new BusinessException("用户状态无效");
-        if (db.jdbc
+        if (db.jdbc()
             .update("UPDATE gf_miniapp_user SET account_status=?,update_time=? WHERE id=? AND deleted=0", status, LocalDateTime
                 .now(), id) != 1)
             throw new BusinessException("用户不存在");
@@ -261,12 +288,12 @@ public class PropertyOperationsService {
             .rows("SELECT status,COUNT(*) total FROM gf_property_booking WHERE create_time>=? GROUP BY status", since));
         result.put("daily", db
             .rows("SELECT CAST(create_time AS DATE) day,event_type,COUNT(*) total FROM gf_property_ops_event WHERE create_time>=? GROUP BY CAST(create_time AS DATE),event_type ORDER BY day", since));
-        result.put("pending", db.jdbc
+        result.put("pending", db.jdbc()
             .queryForObject("SELECT COUNT(*) FROM gf_property_booking WHERE status=1", Long.class));
-        result.put("overdue", db.jdbc
+        result.put("overdue", db.jdbc()
             .queryForObject("SELECT COUNT(*) FROM gf_property_booking WHERE status=1 AND booking_time<?", Long.class, LocalDateTime
                 .now()));
-        result.put("unresolved", db.jdbc
+        result.put("unresolved", db.jdbc()
             .queryForObject("SELECT COUNT(*) FROM gf_property_support_ticket WHERE state='OPEN'", Long.class));
         result.put("managers", db
             .rows("SELECT o.manager_id,u.nickname,COUNT(b.id) bookings,SUM(CASE WHEN b.status=6 THEN 1 ELSE 0 END) completed FROM gf_property_booking b JOIN gf_property_operation o ON o.property_id=b.property_id LEFT JOIN gf_miniapp_user u ON u.id=o.manager_id WHERE b.create_time>=? GROUP BY o.manager_id,u.nickname", since));
@@ -306,11 +333,11 @@ public class PropertyOperationsService {
         db.one("SELECT id FROM gf_miniapp_user WHERE id=? AND deleted=0 FOR UPDATE", user);
         var ticket = db.rows("SELECT * FROM gf_property_support_ticket WHERE user_id=? FOR UPDATE", user);
         if (ticket.isEmpty())
-            db.jdbc
+            db.jdbc()
                 .update("INSERT INTO gf_property_support_ticket(user_id,property_id,state,version,update_time) VALUES(?,?,'OPEN',0,?)", user, propertyId, LocalDateTime
                     .now());
         else
-            db.jdbc
+            db.jdbc()
                 .update("UPDATE gf_property_support_ticket SET property_id=?,state='OPEN',version=version+1,update_time=? WHERE user_id=?", propertyId, LocalDateTime
                     .now(), user);
     }
@@ -323,7 +350,7 @@ public class PropertyOperationsService {
         db.one("SELECT id FROM gf_miniapp_user WHERE id=? AND deleted=0 FOR UPDATE", user);
         var rows = db.rows("SELECT * FROM gf_property_support_ticket WHERE user_id=? FOR UPDATE", user);
         if (rows.isEmpty())
-            db.jdbc
+            db.jdbc()
                 .update("INSERT INTO gf_property_support_ticket(user_id,state,version,update_time) VALUES(?,'OPEN',0,?)", user, LocalDateTime
                     .now());
         var ticket = support(user, true);
@@ -365,10 +392,10 @@ public class PropertyOperationsService {
             default -> throw new BusinessException("会话操作无效");
         }
 
-        db.jdbc
+        db.jdbc()
             .update("UPDATE gf_property_support_ticket SET owner_admin_id=?,state=?,version=version+1,update_time=? WHERE user_id=?", owner, state, LocalDateTime
                 .now(), user);
-        db.jdbc
+        db.jdbc()
             .update("INSERT INTO gf_property_support_log(id,user_id,admin_id,action,note,create_time) VALUES(?,?,?,?,?,?)", IdUtil
                 .getSnowflakeNextId(), user, admin, input.action(), input.note(), LocalDateTime.now());
     }
@@ -378,11 +405,11 @@ public class PropertyOperationsService {
         db.one("SELECT id FROM gf_miniapp_user WHERE id=? AND deleted=0 FOR UPDATE", user);
         var rows = db.rows("SELECT state FROM gf_property_support_ticket WHERE user_id=? FOR UPDATE", user);
         if (rows.isEmpty())
-            db.jdbc
+            db.jdbc()
                 .update("INSERT INTO gf_property_support_ticket(user_id,state,version,update_time) VALUES(?,'OPEN',0,?)", user, LocalDateTime
                     .now());
         else
-            db.jdbc
+            db.jdbc()
                 .update("UPDATE gf_property_support_ticket SET state='OPEN',version=version+1,update_time=? WHERE user_id=?", LocalDateTime
                     .now(), user);
     }

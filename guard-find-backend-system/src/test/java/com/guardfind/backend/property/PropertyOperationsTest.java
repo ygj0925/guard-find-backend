@@ -76,10 +76,16 @@ class PropertyOperationsTest {
         for (String statement : sql.split(";"))
             if (!statement.isBlank())
                 jdbc.execute(statement);
+        var leaseSql = Files.readString(Path
+            .of("../guard-find-backend-api/src/main/resources/db/changelog/mysql/property_lease_workflow.sql"))
+            .split("-- changeset guardfind:property-lease-menu-1")[0];
+        for (String statement : leaseSql.split(";"))
+            if (!statement.isBlank())
+                jdbc.execute(statement);
         jdbc.update("INSERT INTO gf_miniapp_user(id,nickname,openid,is_property_manager) VALUES(1,'guest','open1',0),(2,'owner','open2',0),(3,'manager','open3',1),(4,'other','open4',0)");
         jdbc.update("INSERT INTO sys_user(id,nickname) VALUES(10,'staff'),(20,'other staff')");
         jdbc.update("INSERT INTO gf_property(id,user_id,title,price,price_type,address) VALUES(100,2,'test property',1000,'rent','address')");
-        var store = new OperationsStore(jdbc);
+        var store = proxy(new OperationsStore(jdbc));
         roles = mock(com.guardfind.backend.system.service.RoleService.class);
         operations = proxy(new PropertyOperationsService(store, new ObjectMapper(), new TenantExtensionProperties(), roles));
         notifications = new PropertyNotificationService(store, operations, tx);

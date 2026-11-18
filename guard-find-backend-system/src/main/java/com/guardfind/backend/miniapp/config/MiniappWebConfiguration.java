@@ -51,7 +51,10 @@ public class MiniappWebConfiguration implements WebMvcConfigurer {
                         .equals("/miniapp/property/home") || path
                             .equals("/miniapp/property/operations/settings") || path
                                 .matches("/miniapp/property/[0-9]+/operations") || path
-                                    .matches("/miniapp/property/[0-9]+") || path.equals("/miniapp/region/tree"));
+                                    .matches("/miniapp/property/[0-9]+") || path.equals("/miniapp/region/tree") || path
+                                        .equals("/miniapp/region/source") || path
+                                            .equals("/miniapp/property/map") || path
+                                                .equals("/miniapp/property/communities"));
                 Long id = StpMiniappUtil.getLoginId(StpMiniappUtil.getTokenValue());
                 if (id != null) {
                     var user = users.selectById(id);

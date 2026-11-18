@@ -27,7 +27,12 @@ import java.time.format.DateTimeFormatter;
 @Repository
 @RequiredArgsConstructor
 public class OperationsStore {
-    public final JdbcTemplate jdbc;
+    private final JdbcTemplate jdbc;
+
+    /** Field reads bypass Spring repository proxies; dispatch through the target instead. */
+    public JdbcTemplate jdbc() {
+        return jdbc;
+    }
 
     public List<Map<String, Object>> rows(String sql, Object... args) {
         return jdbc.query(sql, (rs, n) -> {
