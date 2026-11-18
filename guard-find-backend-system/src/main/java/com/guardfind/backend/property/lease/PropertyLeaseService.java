@@ -22,6 +22,7 @@ import com.guardfind.backend.property.operations.OperationsStore;
 import com.guardfind.backend.property.operations.PropertyOperationsService;
 import com.guardfind.backend.miniapp.service.MiniappNoticeService;
 import lombok.Data;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import top.continew.starter.core.exception.BusinessException;
@@ -44,6 +45,7 @@ public class PropertyLeaseService {
     private final PropertySigningProfileService signingProfiles;
     private final PropertyIdentityVerificationService identity;
 
+    @Autowired
     public PropertyLeaseService(OperationsStore db,
                                 PropertyOperationsService operations,
                                 MiniappNoticeService notices,
