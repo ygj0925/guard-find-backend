@@ -71,7 +71,7 @@ public class PropertySigningProfileService {
                                                                                                                  .getBytes(1), assetId, user, kind);
         if (values.isEmpty())
             throw new BusinessException("签名或印章已更新，请重新选择本人的签署资料");
-        return values.getFirst();
+        return values.get(0);
     }
 
     @Transactional(rollbackFor = Exception.class)

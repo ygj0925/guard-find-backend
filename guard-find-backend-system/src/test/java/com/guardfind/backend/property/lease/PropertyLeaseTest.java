@@ -78,6 +78,13 @@ class PropertyLeaseTest {
             .split(";"))
             if (!stmt.isBlank())
                 jdbc.execute(stmt);
+        var identitySql = Files.readString(Path
+            .of("../guard-find-backend-api/src/main/resources/db/changelog/mysql/property_identity_verification.sql"))
+            .split("-- changeset guardfind:property-identity-verification-menu-1")[0]
+            .replace("b'0'", "0");
+        for (var stmt : identitySql.split(";"))
+            if (!stmt.isBlank())
+                jdbc.execute(stmt);
         jdbc.update("INSERT INTO gf_miniapp_user(id,nickname) VALUES(1,'tenant'),(2,'landlord'),(3,'other')");
         for (var stmt : Files.readString(Path
             .of("../guard-find-backend-api/src/main/resources/db/changelog/mysql/property_lease_review.sql"))
