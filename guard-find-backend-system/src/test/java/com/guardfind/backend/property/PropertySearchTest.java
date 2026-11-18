@@ -330,9 +330,9 @@ class PropertySearchTest {
         paging.setSize(1);
         var result = service.page(query, paging);
         assertEquals(2, result.getTotal());
-        assertEquals(2L, result.getList().getFirst().getId());
-        assertTrue(result.getList().getFirst().isRecommended());
-        assertEquals("day", result.getList().getFirst().getPriceUnit());
+        assertEquals(2L, result.getList().get(0).getId());
+        assertTrue(result.getList().get(0).isRecommended());
+        assertEquals("day", result.getList().get(0).getPriceUnit());
         query.setRentalMode("room");
         query.setPriceUnit("month");
         assertEquals(List.of(4L), ids(query));

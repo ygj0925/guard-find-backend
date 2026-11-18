@@ -174,7 +174,7 @@ class PropertyHomeTest {
         when(properties.selectList(any())).thenReturn(List.of(property(10, 2)));
         var result = service.getPublic();
         assertEquals(List.of("active"), result.getActivities().stream().map(PropertyHomeResp.Activity::getId).toList());
-        assertEquals(List.of(10L), result.getActivities().getFirst().getPropertyIds());
+        assertEquals(List.of(10L), result.getActivities().get(0).getPropertyIds());
         assertEquals(List.of("all", "rec", "active", "published"), result.getBanners()
             .stream()
             .map(PropertyHomeResp.Banner::getId)
@@ -185,7 +185,7 @@ class PropertyHomeTest {
         assertTrue(query.getValue().getSqlSegment().contains("deleted"));
         assertTrue(query.getValue().getParamNameValuePairs().containsValue(2));
         assertEquals(4, service.getForAdmin().getActivities().size());
-        assertEquals(List.of(10L, 11L, 12L), service.getForAdmin().getActivities().getFirst().getPropertyIds());
+        assertEquals(List.of(10L, 11L, 12L), service.getForAdmin().getActivities().get(0).getPropertyIds());
     }
 
     @Test
@@ -220,13 +220,13 @@ class PropertyHomeTest {
         var saved = ArgumentCaptor.forClass(PropertyHomeDO.class);
         verify(homes).update(saved.capture(), any());
         var restored = json.readValue(saved.getValue().getContentJson(), PropertyHomeResp.class);
-        assertEquals(List.of(10L, 11L, 12L), restored.getActivities().getFirst().getPropertyIds());
-        assertEquals("active", restored.getBanners().getFirst().getTargetId());
+        assertEquals(List.of(10L, 11L, 12L), restored.getActivities().get(0).getPropertyIds());
+        assertEquals("active", restored.getBanners().get(0).getTargetId());
         clearInvocations(homes);
         when(properties.selectList(any())).thenReturn(List.of(property(10, 2)));
         assertThrows(BusinessException.class, () -> service.save(home));
         when(properties.selectList(any())).thenReturn(List.of(property(10, 2), property(11, 1), property(12, 3)));
-        home.getBanners().getFirst().setTargetId("missing");
+        home.getBanners().get(0).setTargetId("missing");
         assertThrows(BusinessException.class, () -> service.save(home));
         verifyNoInteractions(homes);
     }
@@ -340,7 +340,7 @@ class PropertyHomeTest {
             .addInterceptors(registry);
         var captured = ArgumentCaptor.forClass(org.springframework.web.servlet.HandlerInterceptor.class);
         verify(registry, times(2)).addInterceptor(captured.capture());
-        var interceptor = captured.getAllValues().getFirst();
+        var interceptor = captured.getAllValues().get(0);
         var request = new org.springframework.mock.web.MockHttpServletRequest("GET", "/miniapp/property/home");
         request.setServletPath("/miniapp/property/home");
         var response = new org.springframework.mock.web.MockHttpServletResponse();

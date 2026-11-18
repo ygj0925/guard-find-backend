@@ -289,12 +289,12 @@ class PropertyRegressionTest {
         when(properties.selectPage(any(), any())).thenReturn(page);
         when(interactions.favoritedIds(1L, List.of(10L, 11L))).thenReturn(java.util.Set.of(11L));
         var list = service.page(new PropertyQuery(), null).getList();
-        assertFalse(list.getFirst().getIsFavorited());
-        assertTrue(list.getLast().getIsFavorited());
+        assertFalse(list.get(0).getIsFavorited());
+        assertTrue(list.get(list.size() - 1).getIsFavorited());
         verify(interactions).favoritedIds(1L, List.of(10L, 11L));
         verify(interactions, never()).isFavorited(anyLong(), anyLong());
         MiniappUserContextHolder.clear();
-        assertNull(service.page(new PropertyQuery(), null).getList().getFirst().getIsFavorited());
+        assertNull(service.page(new PropertyQuery(), null).getList().get(0).getIsFavorited());
     }
 
     @Test
@@ -479,8 +479,8 @@ class PropertyRegressionTest {
         when(users.selectByIds(any())).thenReturn(List.of(owner));
         var result = interaction.favorites(1L, null);
         assertEquals(1, result.getTotal());
-        assertEquals("房东", result.getList().getFirst().getOwnerNickname());
-        assertTrue(result.getList().getFirst().getIsFavorited());
+        assertEquals("房东", result.getList().get(0).getOwnerNickname());
+        assertTrue(result.getList().get(0).getIsFavorited());
         verifyNoInteractions(favorites);
     }
 
@@ -548,7 +548,7 @@ class PropertyRegressionTest {
         when(properties.selectPage(any(), any())).thenReturn(page);
         when(properties.favoritePage(any(), eq(1L))).thenReturn(page);
         assertEquals(1, service.pageForAdmin(null, null, null, null).getTotal());
-        assertNull(interaction.favorites(1L, null).getList().getFirst().getUserId());
+        assertNull(interaction.favorites(1L, null).getList().get(0).getUserId());
         verifyNoInteractions(users);
     }
 

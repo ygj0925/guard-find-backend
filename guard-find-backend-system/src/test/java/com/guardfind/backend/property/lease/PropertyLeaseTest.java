@@ -219,9 +219,9 @@ class PropertyLeaseTest {
         var records = store
             .rows("SELECT signer_role,content_hash,signature_hash,contract_snapshot FROM gf_property_lease_signature WHERE lease_id=?", lease);
         assertThat(records).hasSize(1);
-        assertThat(records.getFirst().get("contentHash")).isEqualTo(valid.contentHash());
-        assertThat(records.getFirst().get("signatureHash").toString()).hasSize(64);
-        assertThat(records.getFirst().get("contractSnapshot").toString()).contains("双方约定的租赁条款全文");
+        assertThat(records.get(0).get("contentHash")).isEqualTo(valid.contentHash());
+        assertThat(records.get(0).get("signatureHash").toString()).hasSize(64);
+        assertThat(records.get(0).get("contractSnapshot").toString()).contains("双方约定的租赁条款全文");
         assertThatThrownBy(() -> service.action(lease, 9, true, action("RECALL", version(lease), "改正文")))
             .hasMessageContaining("已有一方");
         assertThatThrownBy(() -> service.action(lease, 1, false, action("DECLINE", version(lease), "拒绝")))

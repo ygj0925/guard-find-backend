@@ -51,7 +51,7 @@ class MiniappAuthTest {
             return new InterceptorRegistration(interceptor);
         });
         new MiniappWebConfiguration(users, new TenantExtensionProperties()).addInterceptors(registry);
-        auth = captured.getFirst();
+        auth = captured.get(0);
         MiniappUserContextHolder.clear();
     }
 
@@ -142,7 +142,7 @@ class MiniappAuthTest {
                 return new InterceptorRegistration(interceptor);
             });
             new MiniappWebConfiguration(users, tenant).addInterceptors(registry);
-            assertThrows(MiniappBizException.class, () -> interceptors.getFirst()
+            assertThrows(MiniappBizException.class, () -> interceptors.get(0)
                 .preHandle(request("GET", "/miniapp/property/list"), new MockHttpServletResponse(), this));
             verifyNoInteractions(users);
         }
