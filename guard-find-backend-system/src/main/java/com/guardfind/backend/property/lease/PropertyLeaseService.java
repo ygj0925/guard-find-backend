@@ -293,7 +293,7 @@ public class PropertyLeaseService {
             }
             signature.remove("strokesJson");
             db.jdbc()
-                .query("SELECT image_data,seal_data,contract_snapshot,signer_id,signed_at FROM gf_property_lease_signature WHERE id=?", rs -> {
+                .query("SELECT image_data,seal_data,contract_snapshot,signer_id,signed_at,verification_id FROM gf_property_lease_signature WHERE id=?", rs -> {
                     byte[] image = rs.getBytes(1), seal = rs.getBytes(2);
                     String imageHash = digest(image);
                     if (!imageHash.equals(text(signature, "signatureHash")) || !digest(rs.getString(3)
@@ -302,7 +302,7 @@ public class PropertyLeaseService {
                             .equals(text(row, "contentHash")) || !signatureRecordHash(text(signature, "contentHash"), rs
                                 .getLong(4), text(signature, "signerRole"), text(signature, "signedName"), rs
                                     .getTimestamp(5)
-                                    .toLocalDateTime(), imageHash, seal, text(signature, "consentText"))
+                                     .toLocalDateTime(), imageHash, seal, text(signature, "consentText"), rs.getObject(6, Long.class))
                                 .equals(text(signature, "recordHash")))
                         throw fail("签署记录校验失败，请联系管理员");
                     signature.put("imageBase64", Base64.getEncoder().encodeToString(image));
@@ -630,7 +630,6 @@ public class PropertyLeaseService {
                         throw fail("合同还有未解决的审阅意见，请先在合同详情确认处理结果");
                     if (signatureExpired(row))
                         throw fail("签署期限已过，请联系管理员重新发起合同");
-                    identity.requireVerified(actor, input.verificationId());
                     if (date(text(row, "endDate")).isBefore(LocalDate.now()))
                         throw fail("合同租期已经结束，请联系管理员");
                     String prefix = actorType.equals("TENANT") ? "tenant" : "landlord";
@@ -643,13 +642,14 @@ public class PropertyLeaseService {
                         throw fail("合同正文校验失败，请联系管理员");
                     if (input.signedName() == null || !input.signedName().trim().equals(text(row, prefix + "Name")))
                         throw fail("签署姓名须与合同当事人姓名一致");
+                    Long verificationId = identity.requireVerified(actor, input.verificationId(), text(row, prefix + "Name"));
                     overlap(row);
                     if (input.handwriting() == null)
                         throw fail("请手写本人姓名后提交签署");
                     byte[] image = input.handwriting().render();
                     byte[] seal = input.sealId() == null ? null : signingProfiles.image(actor, input.sealId(), "SEAL");
                     var signedAt = LocalDateTime.now().truncatedTo(ChronoUnit.MICROS);
-                    saveSignature(row, actor, actorType, input, image, seal, signedAt);
+                    saveSignature(row, actor, actorType, input, image, seal, signedAt, verificationId);
                     if (Boolean.TRUE.equals(input.saveSignature()))
                         signingProfiles.saveHandwriting(actor, input.handwriting(), image);
                     String column = prefix.equals("tenant") ? "tenant" : "landlord";
@@ -970,16 +970,17 @@ public class PropertyLeaseService {
                                Action input,
                                byte[] image,
                                byte[] seal,
-                               LocalDateTime signedAt) {
+                                LocalDateTime signedAt,
+                                Long verificationId) {
         try {
             String imageHash = digest(image);
             String recordHash = signatureRecordHash(text(row, "contentHash"), actor, role, input.signedName()
-                .trim(), signedAt, imageHash, seal, SIGNING_CONSENT);
+                 .trim(), signedAt, imageHash, seal, SIGNING_CONSENT, verificationId);
             db.jdbc()
-                .update("INSERT INTO gf_property_lease_signature(id,lease_id,signer_id,signer_role,signed_name,content_hash,contract_snapshot,strokes_json,image_data,signature_hash,record_hash,consent_text,signed_at,seal_data) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)", IdUtil
+                .update("INSERT INTO gf_property_lease_signature(id,lease_id,signer_id,signer_role,signed_name,content_hash,contract_snapshot,strokes_json,image_data,signature_hash,record_hash,consent_text,signed_at,seal_data,verification_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", IdUtil
                     .getSnowflakeNextId(), id(row, "id"), actor, role, input.signedName()
                         .trim(), text(row, "contentHash"), snapshot(row), json.writeValueAsString(input
-                            .handwriting()), image, imageHash, recordHash, SIGNING_CONSENT, signedAt, seal);
+                             .handwriting()), image, imageHash, recordHash, SIGNING_CONSENT, signedAt, seal, verificationId);
         } catch (java.io.IOException e) {
             throw new IllegalStateException("签署记录保存失败", e);
         }
@@ -992,10 +993,15 @@ public class PropertyLeaseService {
                                        LocalDateTime signedAt,
                                        String imageHash,
                                        byte[] seal,
-                                       String consent) {
+                                        String consent,
+                                        Long verificationId) {
         try {
-            return digest(json.writeValueAsString(List.of(contentHash, actor, role, name, signedAt
-                .toString(), imageHash, seal == null ? "" : digest(seal), consent)).getBytes(StandardCharsets.UTF_8));
+            var evidence = new ArrayList<Object>(List.of(contentHash, actor, role, name, signedAt.toString(), imageHash,
+                seal == null ? "" : digest(seal), consent));
+            // The original hash format is retained for signatures without identity evidence.
+            if (verificationId != null)
+                evidence.add(verificationId);
+            return digest(json.writeValueAsString(evidence).getBytes(StandardCharsets.UTF_8));
         } catch (java.io.IOException e) {
             throw new IllegalStateException(e);
         }

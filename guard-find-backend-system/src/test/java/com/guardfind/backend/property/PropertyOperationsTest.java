@@ -203,6 +203,41 @@ class PropertyOperationsTest {
     }
 
     @Test
+    void pausedPropertyRequiresCheckoutAndSettlementOfLatestLeaseBeforeReopening() throws Exception {
+        for (var statement : Files.readString(Path.of(
+            "../guard-find-backend-api/src/main/resources/db/changelog/mysql/property_lease_lifecycle.sql")).split(";"))
+            if (!statement.isBlank())
+                jdbc.execute(statement);
+        String insertLease = """
+            INSERT INTO gf_property_lease(id,property_id,property_title,property_address,tenant_id,landlord_id,title,
+                landlord_name,tenant_name,start_date,end_date,monthly_rent,deposit,terms,status,create_time,update_time)
+            VALUES(?,100,'apartment','address',1,2,'lease','owner','guest',?,?,1000,1000,'terms','SIGNED',NOW(),NOW())
+            """;
+        var today = LocalDate.now();
+        jdbc.update(insertLease, 10, today.minusMonths(4), today.minusMonths(3));
+        jdbc.update(insertLease, 11, today.minusMonths(2), today.minusDays(1));
+        String insertDocument = """
+            INSERT INTO gf_property_lease_document(id,lease_id,kind,content_json,content_hash,status,create_time,update_time)
+            VALUES(?,?,?,'{}','hash',?,NOW(),NOW())
+            """;
+        jdbc.update(insertDocument, 1, 10, "CHECK_OUT", "CONFIRMED");
+        jdbc.update(insertDocument, 2, 10, "SETTLEMENT", "CLOSED");
+        jdbc.update(insertDocument, 3, 11, "CHECK_OUT", "CONFIRMED");
+        jdbc.update(insertDocument, 4, 11, "SETTLEMENT", "REFUNDED");
+        jdbc.update("INSERT INTO gf_property_operation(property_id,availability,version,update_time) VALUES(100,'RENTED',0,NOW())");
+        try (var stp = mockStatic(StpUtil.class)) {
+            operations.saveProperty(100, new PropertyOperationsService.PropertyInput(null, "PAUSED", "维修", null,
+                null, null, null, null, 0));
+            var open = new PropertyOperationsService.PropertyInput(null, "ACTIVE", "", null, null, null, null, null, 1);
+            assertThatThrownBy(() -> operations.saveProperty(100, open)).hasMessageContaining("押金结算到账确认");
+            assertThat(operations.property(100, null, true).get("availability")).isEqualTo("PAUSED");
+            jdbc.update("UPDATE gf_property_lease_document SET status='CLOSED' WHERE id=4");
+            operations.saveProperty(100, open);
+            assertThat(operations.property(100, null, true).get("availability")).isEqualTo("ACTIVE");
+        }
+    }
+
+    @Test
     void policiesMustBeCompleteAndWechatStartsDisabled() {
         var settings = operations.settings();
         assertThat(settings.isSubscriptionEnabled()).isFalse();

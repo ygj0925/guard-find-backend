@@ -152,7 +152,7 @@ public class PropertyOperationsService {
     public record PropertyInput(Long managerId, String availability, String reason, String reopenDate, Double latitude,
                                 Double longitude, String meetingPoint, String instructions, long version) {}
 
-    @Transactional(rollbackFor = Exception.class)
+    @Transactional(rollbackFor = Exception.class, isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
     public void saveProperty(long id, PropertyInput input) {
         platform();
         db.one("SELECT id FROM gf_property WHERE id=? AND deleted=0 FOR UPDATE", id);
@@ -190,15 +190,11 @@ public class PropertyOperationsService {
         if (version != input.version())
             throw new BusinessException("房源运营信息已更新，请刷新");
         if ("ACTIVE".equals(input.availability())) {
-            if (!db
-                .rows("SELECT id FROM gf_property_lease WHERE property_id=? AND status='SIGNED' AND end_date>=?", id, LocalDate
-                    .now())
-                .isEmpty())
-                throw new BusinessException("房源存在有效或已签订的未来租约，请先处理合同再开放接待");
-            if ("RENTED".equals(previous.get("availability")) && !db
-                .rows("SELECT id FROM gf_property_lease WHERE property_id=? AND status IN('SIGNED','TERMINATED')", id)
-                .isEmpty())
-                throw new BusinessException("请完成退租交接与押金结算，从合同详情确认重新开放房源");
+            if ("ACTIVE".equals(previous.get("availability"))) {
+                assertAvailable(id);
+            } else if (requireLeaseReadyForReopening(id).isPresent() && "RENTED".equals(previous.get("availability"))) {
+                throw new BusinessException("请从合同详情确认重新开放房源");
+            }
         }
         if (db.jdbc()
             .queryForObject("SELECT COUNT(*) FROM gf_property_operation WHERE property_id=?", Long.class, id) == 0)
@@ -228,11 +224,29 @@ public class PropertyOperationsService {
                 .now(), propertyId);
     }
 
+    private boolean hasCurrentOrFutureLease(long propertyId) {
+        return !db.rows("SELECT id FROM gf_property_lease WHERE property_id=? AND status='SIGNED' AND end_date>=? LIMIT 1",
+            propertyId, LocalDate.now()).isEmpty();
+    }
+
+    /** Both reopening entry points hold the property row lock until the state change commits. */
+    public OptionalLong requireLeaseReadyForReopening(long propertyId) {
+        if (hasCurrentOrFutureLease(propertyId))
+            throw new BusinessException("房源存在有效或其他已签租约，不能重新开放");
+        var latest = db.rows("SELECT id FROM gf_property_lease WHERE property_id=? AND status IN('SIGNED','TERMINATED') ORDER BY start_date DESC,id DESC LIMIT 1",
+            propertyId);
+        if (latest.isEmpty())
+            return OptionalLong.empty();
+        long leaseId = id(latest.get(0), "id");
+        var completed = db.rows("SELECT DISTINCT kind FROM gf_property_lease_document WHERE lease_id=? AND ((kind='CHECK_OUT' AND status='CONFIRMED') OR (kind='SETTLEMENT' AND status='CLOSED'))",
+            leaseId);
+        if (completed.size() != 2)
+            throw new BusinessException("请先完成最近一份租约的退租交接及押金结算到账确认");
+        return OptionalLong.of(leaseId);
+    }
+
     public void assertAvailable(long id) {
-        if (!db
-            .rows("SELECT id FROM gf_property_lease WHERE property_id=? AND status='SIGNED' AND end_date>=?", id, LocalDate
-                .now())
-            .isEmpty())
+        if (hasCurrentOrFutureLease(id))
             throw new BusinessException("该房源已有已签租约，暂不接受新预约");
         var rows = db.rows("SELECT availability FROM gf_property_operation WHERE property_id=?", id);
         if (!rows.isEmpty() && !"ACTIVE".equals(rows.get(0).get("availability")))

@@ -21,6 +21,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.guardfind.backend.miniapp.service.MiniappNoticeService;
 import com.guardfind.backend.property.operations.OperationsStore;
+import com.guardfind.backend.property.operations.PropertyOperationsService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -43,6 +44,7 @@ public class PropertyLeaseLifecycleService {
     private final PropertyLeaseService leases;
     private final MiniappNoticeService notices;
     private final ObjectMapper json;
+    private final PropertyOperationsService operations;
 
     public record BillInput(String kind, String title, String periodStart, String periodEnd, String dueDate,
                             BigDecimal amount) {}
@@ -389,21 +391,9 @@ public class PropertyLeaseLifecycleService {
         if (!"TERMINATED".equals(lease.get("status")) && !("SIGNED".equals(lease
             .get("status")) && date(text(lease, "endDate")).isBefore(LocalDate.now())))
             throw fail("请先终止合同或等待租期结束");
-        if (!db
-            .rows("SELECT id FROM gf_property_lease WHERE property_id=? AND status='SIGNED' AND end_date>=?", id(lease, "propertyId"), LocalDate
-                .now())
-            .isEmpty())
-            throw fail("房源存在其他已签租约，不能重新开放");
-        var latest = db
-            .one("SELECT id FROM gf_property_lease WHERE property_id=? AND status IN('SIGNED','TERMINATED') ORDER BY start_date DESC,id DESC LIMIT 1", id(lease, "propertyId"));
-        if (id(latest, "id") != leaseId)
+        var latest = operations.requireLeaseReadyForReopening(id(lease, "propertyId"));
+        if (latest.isEmpty() || latest.getAsLong() != leaseId)
             throw fail("请从房源最近一份已签租约完成交接与结算后恢复接待");
-        if (db
-            .rows("SELECT id FROM gf_property_lease_document WHERE lease_id=? AND kind='CHECK_OUT' AND status='CONFIRMED'", leaseId)
-            .isEmpty() || db
-                .rows("SELECT id FROM gf_property_lease_document WHERE lease_id=? AND kind='SETTLEMENT' AND status='CLOSED'", leaseId)
-                .isEmpty())
-            throw fail("请先完成退租交接及押金结算到账确认");
         var property = db
             .one("SELECT availability FROM gf_property_operation WHERE property_id=?", id(lease, "propertyId"));
         if (!"RENTED".equals(property.get("availability")))

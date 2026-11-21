@@ -84,6 +84,7 @@ class PropertyLeaseTest {
         for (var stmt : identitySql.split(";"))
             if (!stmt.isBlank())
                 jdbc.execute(stmt);
+        jdbc.execute(Files.readString(Path.of("../guard-find-backend-api/src/main/resources/db/changelog/mysql/property_lease_signature_identity.sql")));
         jdbc.update("INSERT INTO gf_miniapp_user(id,nickname) VALUES(1,'tenant'),(2,'landlord'),(3,'other')");
         for (var stmt : Files.readString(Path
             .of("../guard-find-backend-api/src/main/resources/db/changelog/mysql/property_lease_review.sql"))
@@ -197,6 +198,42 @@ class PropertyLeaseTest {
         assertThat(detail(lease).get("unresolvedReviews")).isEqualTo(0L);
         assertThat((List<?>)detail(lease).get("reviews")).hasSize(1);
         service.action(lease, 1, false, sign(lease, 1));
+    }
+
+    @Test
+    void manualReviewQueuePaginatesOldestFirstAndSkipsProviderAndCompletedSessions() {
+        var identities = new PropertyIdentityVerificationService(store);
+        var first = LocalDateTime.now().minusDays(1);
+        for (int id = 1; id <= 24; id++) {
+            String status = id == 23 ? "VERIFIED" : "PENDING";
+            String provider = id == 24 ? "TENCENT" : id == 1 ? null : "MANUAL";
+            jdbc.update("INSERT INTO gf_property_identity_verification(id,user_id,status,provider,consent_version,consent_time,create_time,update_time) VALUES(?,1,?,?,'v1',?,?,?)",
+                id, status, provider, first, first.plusMinutes(id), first.plusMinutes(id));
+        }
+        var page = identities.page("AWAITING_REVIEW", 2, 20);
+        assertThat(page.get("total")).isEqualTo(22L);
+        @SuppressWarnings("unchecked") var rows = (List<Map<String, Object>>)page.get("list");
+        assertThat(rows).extracting(r -> r.get("id")).containsExactly("21", "22");
+        assertThat(identities.page(null, 1, 20).get("total")).isEqualTo(24L);
+        assertThatThrownBy(() -> identities.adminAction(24, 9, new PropertyIdentityVerificationService.AdminAction("VERIFY", null, 0L)))
+            .isInstanceOf(top.continew.starter.core.exception.BusinessException.class);
+    }
+
+    @Test
+    void requiredSigningBindsTheVerifiedPartyNameAndEvidence() {
+        long lease = create();
+        publish(lease);
+        jdbc.update("UPDATE gf_property_identity_config SET mode='MANUAL',required_for_signing=true WHERE id=1");
+        jdbc.update("INSERT INTO gf_property_identity_verification(id,user_id,status,real_name,consent_version,consent_time,create_time,update_time,expires_at) VALUES(123,1,'VERIFIED','其他姓名','v1',NOW(),NOW(),NOW(),?)", LocalDateTime.now().plusDays(1));
+        var signature = sign(lease, 1);
+        assertThatThrownBy(() -> service.action(lease, 1, false, signature)).hasMessageContaining("实名核验姓名");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM gf_property_lease_signature", Long.class)).isZero();
+        jdbc.update("UPDATE gf_property_identity_verification SET real_name='租客' WHERE id=123");
+        service.action(lease, 1, false, signature);
+        assertThat(jdbc.queryForObject("SELECT verification_id FROM gf_property_lease_signature WHERE lease_id=?", Long.class, lease)).isEqualTo(123L);
+        assertThat((List<?>)detail(lease).get("signatures")).hasSize(1);
+        jdbc.update("UPDATE gf_property_lease_signature SET verification_id=NULL WHERE lease_id=?", lease);
+        assertThatThrownBy(() -> detail(lease)).hasMessageContaining("签署记录校验失败");
     }
 
     @Test

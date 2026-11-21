@@ -17,6 +17,9 @@
 package com.guardfind.backend.property.lease;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.guardfind.backend.common.config.TenantExtensionProperties;
+import com.guardfind.backend.property.operations.PropertyOperationsService;
+import com.guardfind.backend.system.service.RoleService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.aop.framework.ProxyFactory;
@@ -33,7 +36,8 @@ class PropertyLeaseLifecycleTest extends PropertyLeaseTest {
 
     @BeforeEach
     void lifecycle() {
-        var proxy = new ProxyFactory(new PropertyLeaseLifecycleService(store, service, notices, new ObjectMapper()));
+        var propertyOps = new PropertyOperationsService(store, new ObjectMapper(), new TenantExtensionProperties(), mock(RoleService.class));
+        var proxy = new ProxyFactory(new PropertyLeaseLifecycleService(store, service, notices, new ObjectMapper(), propertyOps));
         proxy.setProxyTargetClass(true);
         proxy.addAdvice(new TransactionInterceptor(tx, new AnnotationTransactionAttributeSource()));
         lifecycle = (PropertyLeaseLifecycleService)proxy.getProxy();

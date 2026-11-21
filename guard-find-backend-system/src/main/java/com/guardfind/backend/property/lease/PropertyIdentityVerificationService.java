@@ -41,6 +41,7 @@ import static com.guardfind.backend.property.operations.OperationsStore.text;
  */
 @Service
 public class PropertyIdentityVerificationService {
+    private static final String MANUAL_REVIEW = "i.status IN ('PENDING','REVIEW_REQUIRED') AND (i.provider='MANUAL' OR i.provider IS NULL)";
     private final OperationsStore db;
     private final IdentityVerificationProvider provider;
 
@@ -149,7 +150,7 @@ public class PropertyIdentityVerificationService {
         db.jdbc()
             .update("INSERT INTO gf_property_identity_verification(id,user_id,status,real_name,id_number_masked,id_number_hash,provider,provider_session_id,provider_launch_url,consent_version,consent_time,failure_reason,create_time,update_time) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)", sessionId, userId, state, realName, idNumber == null
                 ? null
-                : maskIdNumber(idNumber), idNumber == null ? null : sha256(idNumber), config.getProvider(), begin
+             : maskIdNumber(idNumber), idNumber == null ? null : sha256(idNumber), "MANUAL".equals(config.getMode()) ? "MANUAL" : config.getProvider(), begin
                     .providerSessionId() == null ? Long.toString(sessionId) : begin.providerSessionId(), begin
                         .launchUrl(), config.getConsentVersion(), now, failure, now, now);
         db.jdbc()
@@ -183,7 +184,7 @@ public class PropertyIdentityVerificationService {
         if (input == null || input.action() == null)
             throw fail("请选择核验处理结果");
         Map<String, Object> row = db
-            .one("SELECT * FROM gf_property_identity_verification WHERE id=? FOR UPDATE", sessionId);
+            .one("SELECT i.* FROM gf_property_identity_verification i WHERE i.id=? AND " + MANUAL_REVIEW + " FOR UPDATE", sessionId);
         if (input.version() != null && id(row, "version") != input.version())
             throw fail("核验记录已更新，请刷新后再处理");
         String action = input.action().trim().toUpperCase(Locale.ROOT);
@@ -268,12 +269,15 @@ public class PropertyIdentityVerificationService {
     public Map<String, Object> page(String status, int page, int size) {
         String from = "FROM gf_property_identity_verification i LEFT JOIN gf_miniapp_user u ON u.id=i.user_id WHERE 1=1";
         var args = new java.util.ArrayList<Object>();
-        if (status != null && !status.isBlank()) {
+        boolean queue = "AWAITING_REVIEW".equals(status);
+        if (queue) {
+            from += " AND " + MANUAL_REVIEW;
+        } else if (status != null && !status.isBlank()) {
             from += " AND i.status=?";
             args.add(status.trim().toUpperCase(Locale.ROOT));
         }
         Map<String, Object> result = db
-            .page(from, args, "i.id,i.user_id,u.nickname AS user_name,'USER' AS role,i.status,i.id_number_masked,i.provider,i.verified_at,i.failure_reason,i.update_time AS last_attempt_at,i.version", "i.update_time DESC,i.id DESC", page, size);
+            .page(from, args, "i.id,i.user_id,u.nickname AS user_name,'USER' AS role,i.status,i.id_number_masked,i.provider,i.verified_at,i.failure_reason,i.update_time AS last_attempt_at,i.version", queue ? "i.create_time ASC,i.id ASC" : "i.update_time DESC,i.id DESC", page, size);
         @SuppressWarnings("unchecked") var rows = (List<Map<String, Object>>)result.get("list");
         for (Map<String, Object> row : rows) {
             row.put("status", normalizeState(text(row, "status")));
@@ -284,15 +288,20 @@ public class PropertyIdentityVerificationService {
         return result;
     }
 
-    public void requireVerified(long userId, Long sessionId) {
+    public Long requireVerified(long userId, Long sessionId, String partyName) {
         Config config = config();
         if (!config.isRequiredForSigning() || "DISABLED".equals(config.getMode()))
-            return;
-        Map<String, Object> row = sessionId == null
-            ? latest(userId)
-            : db.one("SELECT * FROM gf_property_identity_verification WHERE id=? AND user_id=?", sessionId, userId);
-        if (!"VERIFIED".equals(text(row, "status")) || expired(row))
+            return null;
+        var latest = db.rows("SELECT id,status,real_name,expires_at FROM gf_property_identity_verification WHERE user_id=? AND status<>'VOID' ORDER BY update_time DESC,id DESC LIMIT 1 FOR UPDATE", userId);
+        if (latest.isEmpty())
             throw fail("签署前请先完成身份核验");
+        var row = latest.get(0);
+        long verifiedId = id(row, "id");
+        if ((sessionId != null && sessionId != verifiedId) || !"VERIFIED".equals(text(row, "status")) || expired(row))
+            throw fail("签署前请先完成身份核验");
+        if (partyName.isBlank() || !partyName.trim().equals(text(row, "realName").trim()))
+            throw fail("实名核验姓名与合同当事人姓名不一致，请联系管理员核对合同");
+        return verifiedId;
     }
 
     private Map<String, Object> latest(long userId) {

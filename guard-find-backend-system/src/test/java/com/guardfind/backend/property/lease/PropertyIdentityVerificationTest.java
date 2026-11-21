@@ -47,12 +47,12 @@ class PropertyIdentityVerificationTest {
     @Test
     void requiredVerificationRejectsPendingUsersAtSigningGate() {
         OperationsStore db = mock(OperationsStore.class);
-        when(db.one(any(String.class), any(Object[].class))).thenReturn(config("MANUAL", "MANUAL", true))
-            .thenReturn(Map.of("id", "11", "status", "PENDING", "expiresAt", ""));
+        when(db.one(any(String.class), any(Object[].class))).thenReturn(config("MANUAL", "MANUAL", true));
+        when(db.rows(any(String.class), any(Object[].class))).thenReturn(List.of(Map.of("id", "11", "status", "PENDING", "expiresAt", "")));
 
         var service = new PropertyIdentityVerificationService(db);
 
-        assertThatThrownBy(() -> service.requireVerified(7L, 11L)).hasMessageContaining("完成身份核验");
+        assertThatThrownBy(() -> service.requireVerified(7L, 11L, "租客")).hasMessageContaining("完成身份核验");
     }
 
     @Test
