@@ -150,9 +150,12 @@ public class PropertyIdentityVerificationService {
         db.jdbc()
             .update("INSERT INTO gf_property_identity_verification(id,user_id,status,real_name,id_number_masked,id_number_hash,provider,provider_session_id,provider_launch_url,consent_version,consent_time,failure_reason,create_time,update_time) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)", sessionId, userId, state, realName, idNumber == null
                 ? null
-             : maskIdNumber(idNumber), idNumber == null ? null : sha256(idNumber), "MANUAL".equals(config.getMode()) ? "MANUAL" : config.getProvider(), begin
-                    .providerSessionId() == null ? Long.toString(sessionId) : begin.providerSessionId(), begin
-                        .launchUrl(), config.getConsentVersion(), now, failure, now, now);
+                : maskIdNumber(idNumber), idNumber == null ? null : sha256(idNumber), "MANUAL".equals(config.getMode())
+                    ? "MANUAL"
+                    : config.getProvider(), begin.providerSessionId() == null
+                        ? Long.toString(sessionId)
+                        : begin.providerSessionId(), begin.launchUrl(), config
+                            .getConsentVersion(), now, failure, now, now);
         db.jdbc()
             .update("UPDATE gf_property_identity_verification SET status='VOID',update_time=? WHERE id=?", now, id(consent, "id"));
         return session(userId, sessionId);
@@ -277,7 +280,9 @@ public class PropertyIdentityVerificationService {
             args.add(status.trim().toUpperCase(Locale.ROOT));
         }
         Map<String, Object> result = db
-            .page(from, args, "i.id,i.user_id,u.nickname AS user_name,'USER' AS role,i.status,i.id_number_masked,i.provider,i.verified_at,i.failure_reason,i.update_time AS last_attempt_at,i.version", queue ? "i.create_time ASC,i.id ASC" : "i.update_time DESC,i.id DESC", page, size);
+            .page(from, args, "i.id,i.user_id,u.nickname AS user_name,'USER' AS role,i.status,i.id_number_masked,i.provider,i.verified_at,i.failure_reason,i.update_time AS last_attempt_at,i.version", queue
+                ? "i.create_time ASC,i.id ASC"
+                : "i.update_time DESC,i.id DESC", page, size);
         @SuppressWarnings("unchecked") var rows = (List<Map<String, Object>>)result.get("list");
         for (Map<String, Object> row : rows) {
             row.put("status", normalizeState(text(row, "status")));
@@ -292,7 +297,8 @@ public class PropertyIdentityVerificationService {
         Config config = config();
         if (!config.isRequiredForSigning() || "DISABLED".equals(config.getMode()))
             return null;
-        var latest = db.rows("SELECT id,status,real_name,expires_at FROM gf_property_identity_verification WHERE user_id=? AND status<>'VOID' ORDER BY update_time DESC,id DESC LIMIT 1 FOR UPDATE", userId);
+        var latest = db
+            .rows("SELECT id,status,real_name,expires_at FROM gf_property_identity_verification WHERE user_id=? AND status<>'VOID' ORDER BY update_time DESC,id DESC LIMIT 1 FOR UPDATE", userId);
         if (latest.isEmpty())
             throw fail("签署前请先完成身份核验");
         var row = latest.get(0);

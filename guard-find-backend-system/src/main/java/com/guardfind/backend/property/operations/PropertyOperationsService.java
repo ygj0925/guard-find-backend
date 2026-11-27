@@ -225,21 +225,23 @@ public class PropertyOperationsService {
     }
 
     private boolean hasCurrentOrFutureLease(long propertyId) {
-        return !db.rows("SELECT id FROM gf_property_lease WHERE property_id=? AND status='SIGNED' AND end_date>=? LIMIT 1",
-            propertyId, LocalDate.now()).isEmpty();
+        return !db
+            .rows("SELECT id FROM gf_property_lease WHERE property_id=? AND status='SIGNED' AND end_date>=? LIMIT 1", propertyId, LocalDate
+                .now())
+            .isEmpty();
     }
 
     /** Both reopening entry points hold the property row lock until the state change commits. */
     public OptionalLong requireLeaseReadyForReopening(long propertyId) {
         if (hasCurrentOrFutureLease(propertyId))
             throw new BusinessException("房源存在有效或其他已签租约，不能重新开放");
-        var latest = db.rows("SELECT id FROM gf_property_lease WHERE property_id=? AND status IN('SIGNED','TERMINATED') ORDER BY start_date DESC,id DESC LIMIT 1",
-            propertyId);
+        var latest = db
+            .rows("SELECT id FROM gf_property_lease WHERE property_id=? AND status IN('SIGNED','TERMINATED') ORDER BY start_date DESC,id DESC LIMIT 1", propertyId);
         if (latest.isEmpty())
             return OptionalLong.empty();
         long leaseId = id(latest.get(0), "id");
-        var completed = db.rows("SELECT DISTINCT kind FROM gf_property_lease_document WHERE lease_id=? AND ((kind='CHECK_OUT' AND status='CONFIRMED') OR (kind='SETTLEMENT' AND status='CLOSED'))",
-            leaseId);
+        var completed = db
+            .rows("SELECT DISTINCT kind FROM gf_property_lease_document WHERE lease_id=? AND ((kind='CHECK_OUT' AND status='CONFIRMED') OR (kind='SETTLEMENT' AND status='CLOSED'))", leaseId);
         if (completed.size() != 2)
             throw new BusinessException("请先完成最近一份租约的退租交接及押金结算到账确认");
         return OptionalLong.of(leaseId);

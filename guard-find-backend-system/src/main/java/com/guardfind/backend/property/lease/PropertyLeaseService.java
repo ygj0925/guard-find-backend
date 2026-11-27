@@ -302,8 +302,8 @@ public class PropertyLeaseService {
                             .equals(text(row, "contentHash")) || !signatureRecordHash(text(signature, "contentHash"), rs
                                 .getLong(4), text(signature, "signerRole"), text(signature, "signedName"), rs
                                     .getTimestamp(5)
-                                     .toLocalDateTime(), imageHash, seal, text(signature, "consentText"), rs.getObject(6, Long.class))
-                                .equals(text(signature, "recordHash")))
+                                    .toLocalDateTime(), imageHash, seal, text(signature, "consentText"), rs
+                                        .getObject(6, Long.class)).equals(text(signature, "recordHash")))
                         throw fail("签署记录校验失败，请联系管理员");
                     signature.put("imageBase64", Base64.getEncoder().encodeToString(image));
                     if (seal != null)
@@ -642,7 +642,8 @@ public class PropertyLeaseService {
                         throw fail("合同正文校验失败，请联系管理员");
                     if (input.signedName() == null || !input.signedName().trim().equals(text(row, prefix + "Name")))
                         throw fail("签署姓名须与合同当事人姓名一致");
-                    Long verificationId = identity.requireVerified(actor, input.verificationId(), text(row, prefix + "Name"));
+                    Long verificationId = identity.requireVerified(actor, input
+                        .verificationId(), text(row, prefix + "Name"));
                     overlap(row);
                     if (input.handwriting() == null)
                         throw fail("请手写本人姓名后提交签署");
@@ -970,17 +971,17 @@ public class PropertyLeaseService {
                                Action input,
                                byte[] image,
                                byte[] seal,
-                                LocalDateTime signedAt,
-                                Long verificationId) {
+                               LocalDateTime signedAt,
+                               Long verificationId) {
         try {
             String imageHash = digest(image);
             String recordHash = signatureRecordHash(text(row, "contentHash"), actor, role, input.signedName()
-                 .trim(), signedAt, imageHash, seal, SIGNING_CONSENT, verificationId);
+                .trim(), signedAt, imageHash, seal, SIGNING_CONSENT, verificationId);
             db.jdbc()
                 .update("INSERT INTO gf_property_lease_signature(id,lease_id,signer_id,signer_role,signed_name,content_hash,contract_snapshot,strokes_json,image_data,signature_hash,record_hash,consent_text,signed_at,seal_data,verification_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", IdUtil
                     .getSnowflakeNextId(), id(row, "id"), actor, role, input.signedName()
                         .trim(), text(row, "contentHash"), snapshot(row), json.writeValueAsString(input
-                             .handwriting()), image, imageHash, recordHash, SIGNING_CONSENT, signedAt, seal, verificationId);
+                            .handwriting()), image, imageHash, recordHash, SIGNING_CONSENT, signedAt, seal, verificationId);
         } catch (java.io.IOException e) {
             throw new IllegalStateException("签署记录保存失败", e);
         }
@@ -993,11 +994,11 @@ public class PropertyLeaseService {
                                        LocalDateTime signedAt,
                                        String imageHash,
                                        byte[] seal,
-                                        String consent,
-                                        Long verificationId) {
+                                       String consent,
+                                       Long verificationId) {
         try {
-            var evidence = new ArrayList<Object>(List.of(contentHash, actor, role, name, signedAt.toString(), imageHash,
-                seal == null ? "" : digest(seal), consent));
+            var evidence = new ArrayList<Object>(List.of(contentHash, actor, role, name, signedAt
+                .toString(), imageHash, seal == null ? "" : digest(seal), consent));
             // The original hash format is retained for signatures without identity evidence.
             if (verificationId != null)
                 evidence.add(verificationId);

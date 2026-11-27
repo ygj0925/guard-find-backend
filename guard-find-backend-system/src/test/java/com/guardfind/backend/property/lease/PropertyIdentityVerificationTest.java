@@ -48,7 +48,8 @@ class PropertyIdentityVerificationTest {
     void requiredVerificationRejectsPendingUsersAtSigningGate() {
         OperationsStore db = mock(OperationsStore.class);
         when(db.one(any(String.class), any(Object[].class))).thenReturn(config("MANUAL", "MANUAL", true));
-        when(db.rows(any(String.class), any(Object[].class))).thenReturn(List.of(Map.of("id", "11", "status", "PENDING", "expiresAt", "")));
+        when(db.rows(any(String.class), any(Object[].class))).thenReturn(List.of(Map
+            .of("id", "11", "status", "PENDING", "expiresAt", "")));
 
         var service = new PropertyIdentityVerificationService(db);
 

@@ -204,8 +204,9 @@ class PropertyOperationsTest {
 
     @Test
     void pausedPropertyRequiresCheckoutAndSettlementOfLatestLeaseBeforeReopening() throws Exception {
-        for (var statement : Files.readString(Path.of(
-            "../guard-find-backend-api/src/main/resources/db/changelog/mysql/property_lease_lifecycle.sql")).split(";"))
+        for (var statement : Files.readString(Path
+            .of("../guard-find-backend-api/src/main/resources/db/changelog/mysql/property_lease_lifecycle.sql"))
+            .split(";"))
             if (!statement.isBlank())
                 jdbc.execute(statement);
         String insertLease = """
@@ -226,8 +227,8 @@ class PropertyOperationsTest {
         jdbc.update(insertDocument, 4, 11, "SETTLEMENT", "REFUNDED");
         jdbc.update("INSERT INTO gf_property_operation(property_id,availability,version,update_time) VALUES(100,'RENTED',0,NOW())");
         try (var stp = mockStatic(StpUtil.class)) {
-            operations.saveProperty(100, new PropertyOperationsService.PropertyInput(null, "PAUSED", "维修", null,
-                null, null, null, null, 0));
+            operations
+                .saveProperty(100, new PropertyOperationsService.PropertyInput(null, "PAUSED", "维修", null, null, null, null, null, 0));
             var open = new PropertyOperationsService.PropertyInput(null, "ACTIVE", "", null, null, null, null, null, 1);
             assertThatThrownBy(() -> operations.saveProperty(100, open)).hasMessageContaining("押金结算到账确认");
             assertThat(operations.property(100, null, true).get("availability")).isEqualTo("PAUSED");
